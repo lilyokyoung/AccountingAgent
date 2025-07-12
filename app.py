@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import google.generativeai as genai
+import difflib
 
 # 🔐 API config
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
-
 st.set_page_config(page_title="📊 Accounting Analyzer", layout="wide")
 st.title("📈 Financial Statement Analyzer with Industry Comparison & AI Insights")
 
@@ -26,6 +26,11 @@ INDUSTRY_BENCHMARKS = {
         "Net Profit Margin": 0.20
     }
 }
+
+# 🧠 Fuzzy match helper
+def fuzzy_match(target, columns, cutoff=0.6):
+    match = difflib.get_close_matches(target, columns, n=1, cutoff=cutoff)
+    return match[0] if match else None
 
 def detect_industry(file_name):
     name = file_name.lower()
@@ -91,45 +96,37 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
     df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
 
-    st.write("🧾 Columns detected:", df.columns.tolist())
+    st.write("📑 Columns:", df.columns.tolist())
     st.dataframe(df.head())
 
-    # 🔍 Detect industry
     industry = detect_industry(uploaded_file.name)
     st.markdown(f"🏢 **Detected Company:** `{uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}`")
     st.markdown(f"🏷️ **Industry:** `{industry}`")
 
-    # 🔧 Try auto-mapping
-    col_map = {
-        "Short-Term Liabilities": None,
-        "Long-Term Liabilities": None,
-        "Owner's Equity": None,
-        "Current Assets": None,
-        "Net Profit": None,
-        "Revenue": None
+    # 🎯 Fuzzy matching expected fields
+    expected_fields = {
+        "Short-Term Liabilities": "Short-Term Liabilities",
+        "Long-Term Liabilities": "Long-Term Liabilities",
+        "Owner's Equity": "Owner's Equity",
+        "Current Assets": "Current Assets",
+        "Net Profit": "Net Profit",
+        "Revenue": "Revenue"
     }
 
-    for col in df.columns:
-        col_lower = col.lower()
-        if "short" in col_lower and "liab" in col_lower:
-            col_map["Short-Term Liabilities"] = col
-        elif "long" in col_lower and "liab" in col_lower:
-            col_map["Long-Term Liabilities"] = col
-        elif "equity" in col_lower or "net worth" in col_lower:
-            col_map["Owner's Equity"] = col
-        elif any(k in col_lower for k in ["current asset", "short-term asset"]):
-            col_map["Current Assets"] = col
-        elif any(k in col_lower for k in ["net profit", "net income", "profit after tax", "profit"]):
-            col_map["Net Profit"] = col
-        elif any(k in col_lower for k in ["revenue", "sales", "turnover"]):
-            col_map["Revenue"] = col
+    col_map = {}
+    for key, expected in expected_fields.items():
+        match = fuzzy_match(expected, df.columns)
+        col_map[key] = match
 
-    # 🛠 Manual override
     with st.expander("🛠 Manually confirm or correct column mapping"):
         for key in col_map:
-            col_map[key] = st.selectbox(f"{key}", [None] + list(df.columns), index=[None] + list(df.columns).index(col_map[key]) if col_map[key] in df.columns else 0)
+            current_val = col_map[key] if col_map[key] in df.columns else None
+            col_map[key] = st.selectbox(
+                f"{key}",
+                [None] + list(df.columns),
+                index=([None] + list(df.columns)).index(current_val) if current_val else 0
+            )
 
-    # ✅ Proceed if essentials present
     essential_cols = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
     if not all(col_map[c] for c in essential_cols):
         st.error("❌ Missing essential columns: STL, LTL, or Equity.")
