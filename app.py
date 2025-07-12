@@ -1,57 +1,67 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 import plotly.express as px
+import os
+
+# Import the robust extraction function
 from balance_sheet_utils import extract_balance_sheet_summary
 
-st.set_page_config(page_title="📘 Balance Sheet Analyzer", layout="wide")
-st.title("📘 Cleaned Balance Sheet Summary")
+st.set_page_config(page_title="📊 Financial Analyzer", layout="wide")
+st.title("📁 Financial Balance Sheet Analyzer")
 
-# Upload file
-uploaded_file = st.file_uploader("📤 Upload your balance sheet Excel/CSV file", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload your Balance Sheet Excel/CSV file", type=["csv", "xlsx"])
 
 if uploaded_file:
     try:
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
-        st.subheader("📄 Raw Preview of Uploaded File")
-        st.dataframe(df)
-
-        # Extract and show summary
-        summary_df = extract_balance_sheet_summary(df)
-        st.subheader("🧾 Cleaned Balance Sheet Summary")
-        st.dataframe(summary_df)
-
-        if summary_df['Amount'].sum() == 0:
-            st.warning("⚠️ All values extracted are zero. Please check column names and formatting in your file.")
+        file_ext = os.path.splitext(uploaded_file.name)[-1]
+        if file_ext == ".csv":
+            df = pd.read_csv(uploaded_file)
         else:
-            # ✅ Add Ratio Analysis
-            st.subheader("📊 Key Financial Ratios")
-            try:
-                st.markdown("### 📘 Ratio Analysis Based on Latest Year")
-                liabilities = summary_df.loc[summary_df['Category'] == "Short-Term Liabilities", 'Amount'].values[0]
-                equity = summary_df.loc[summary_df['Category'] == "Total Owner's Equity", 'Amount'].values[0]
-                total_assets = summary_df.loc[summary_df['Category'] == "Total Liabilities & Equity", 'Amount'].values[0]
+            df = pd.read_excel(uploaded_file)
 
-                # Ratios
-                current_ratio = round(total_assets / liabilities, 2) if liabilities else None
-                debt_to_equity = round((liabilities) / equity, 2) if equity else None
-                equity_ratio = round(equity / total_assets, 2) if total_assets else None
+        st.markdown("### 🧾 Raw Uploaded Data")
+        st.dataframe(df.head())
 
-                st.metric("🔁 Current Ratio", f"{current_ratio}")
-                st.metric("⚖️ Debt-to-Equity Ratio", f"{debt_to_equity}")
-                st.metric("📐 Equity Ratio", f"{equity_ratio}")
+        # Extract cleaned trend data
+        summary_df = extract_balance_sheet_summary(df)
 
-                # 📈 Graphs
-                st.subheader("📉 Balance Sheet Breakdown")
-                fig = px.pie(summary_df, names='Category', values='Amount', title='Balance Sheet Composition')
+        if "Fiscal Year" not in summary_df.columns:
+            st.error("❌ Fiscal Year column missing in extracted data.")
+        else:
+            st.markdown("### 📈 Financial Trends Over Time")
+            st.dataframe(summary_df)
+
+            numeric_cols = summary_df.columns.drop("Fiscal Year")
+            for col in numeric_cols:
+                fig = px.line(summary_df, x="Fiscal Year", y=col, markers=True,
+                              title=f"{col} Over Time")
                 st.plotly_chart(fig, use_container_width=True)
 
-                bar = px.bar(summary_df, x="Category", y="Amount", title="Balance Sheet Items")
-                st.plotly_chart(bar, use_container_width=True)
+            st.markdown("### 📊 Financial Ratios Over Time")
+            ratios = []
+            for _, row in summary_df.iterrows():
+                total_liab = row["Short-Term Liabilities"] + row["Long-Term Liabilities"]
+                equity = row["Total Owner's Equity"]
+                year = row["Fiscal Year"]
 
-            except Exception as e:
-                st.error(f"❌ Failed to compute ratios: {str(e)}")
+                debt_equity = round(total_liab / equity, 2) if equity else None
+                equity_ratio = round(equity / (total_liab + equity), 2) if (total_liab + equity) else None
+
+                ratios.append({
+                    "Fiscal Year": year,
+                    "Debt to Equity": debt_equity,
+                    "Equity Ratio": equity_ratio
+                })
+
+            ratio_df = pd.DataFrame(ratios)
+            st.dataframe(ratio_df)
+
+            fig1 = px.line(ratio_df, x="Fiscal Year", y="Debt to Equity", markers=True, title="Debt to Equity Over Time")
+            fig2 = px.line(ratio_df, x="Fiscal Year", y="Equity Ratio", markers=True, title="Equity Ratio Over Time")
+            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig2, use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ Failed to read file: {str(e)}")
+        st.error(f"❌ Failed to process file: {e}")
 else:
-    st.info("📥 Please upload a balance sheet file to begin.")
+    st.info("📤 Upload a balance sheet file to begin analysis.")
