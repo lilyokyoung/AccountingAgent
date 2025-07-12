@@ -1,40 +1,41 @@
 import streamlit as st
 import pandas as pd
 
-# App config
+# App layout
 st.set_page_config(page_title="📊 Accounting Agent", layout="wide")
 st.title("📊 Accounting Agent")
-st.markdown("Upload a firm's balance sheet to extract, audit, and visualize the financial structure.")
+st.markdown("Upload a balance sheet file (Excel or CSV) to extract and analyze financial data.")
 
-# Safe import
+# Import extractor
 try:
     from balance_sheet_utils import extract_clean_balance_sheet
 except Exception as e:
-    st.error(f"❌ Failed to import balance sheet parser: {e}")
+    st.error(f"❌ Import failed: {e}")
     st.stop()
 
-# File uploader
-uploaded_file = st.file_uploader("📤 Upload Balance Sheet File (.xlsx or .csv)", type=["xlsx", "csv"])
+# Upload file
+uploaded_file = st.file_uploader("📤 Upload File", type=["xlsx", "csv"])
 
 if not uploaded_file:
-    st.info("👈 Please upload a file to begin.")
+    st.info("👈 Please upload a balance sheet file to continue.")
     st.stop()
 
-# Load the file
+# Preview raw data
 try:
     df = pd.read_excel(uploaded_file, header=None) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file, header=None)
+    st.subheader("📄 Raw Preview of Uploaded File")
+    st.dataframe(df.head(20), use_container_width=True)
 except Exception as e:
-    st.error(f"❌ Could not read file: {e}")
+    st.error(f"❌ Error reading file: {e}")
     st.stop()
 
-# Parse balance sheet
+# Extract balance sheet values
 try:
     clean_df = extract_clean_balance_sheet(df)
     st.subheader("📘 Cleaned Balance Sheet Summary")
     st.dataframe(clean_df, use_container_width=True)
 
     if clean_df["Amount"].sum() == 0:
-        st.warning("⚠️ All values extracted are zero. Please check that the row labels in your file match expected terms like 'retained earnings', 'owner's investment', etc.")
-
+        st.warning("⚠️ All values extracted are zero. Check if your labels match terms like 'retained earnings', 'share capital', etc.")
 except Exception as e:
-    st.error(f"❌ Failed to extract balance sheet values: {e}")
+    st.error(f"❌ Failed to parse balance sheet: {e}")
