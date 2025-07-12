@@ -3,7 +3,7 @@ import streamlit as st
 import plotly.express as px
 import os
 
-# ---------- 🔍 Company Detection from Filename ----------
+# ---------- 🏢 Detect company from filename ----------
 
 def extract_company_name_from_filename(uploaded_file):
     filename = uploaded_file.name.lower()
@@ -35,7 +35,7 @@ industry_benchmarks = {
     "Energy": {"Debt to Equity": 1.8, "Equity Ratio": 0.35}
 }
 
-# ---------- 🧽 Balance Sheet Extraction ----------
+# ---------- 🧽 Clean balance sheet ----------
 
 def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = df.columns.astype(str).str.strip().str.lower()
@@ -84,38 +84,40 @@ if uploaded_file:
         st.markdown("### 🧾 Raw Data Preview")
         st.dataframe(df.head())
 
-        # 🏢 Auto-detect company and industry
+        # 🏢 Detect company & industry
         company_name = extract_company_name_from_filename(uploaded_file)
         industry = map_company_to_industry(company_name)
 
-        # 🔁 Manual fallback
+        # 🔁 Fallback
         if company_name == "Unknown":
             company_name = st.text_input("🏢 Enter Company Name:")
         if industry == "Unknown":
             industry = st.selectbox("🏷️ Select Industry:", list(industry_benchmarks.keys()))
 
-        st.markdown(f"**🏢 Detected/Entered Company:** `{company_name}`")
-        st.markdown(f"**🏷️ Industry Classification:** `{industry}`")
+        st.markdown(f"**🏢 Company:** `{company_name}`")
+        st.markdown(f"**🏷️ Industry:** `{industry}`")
 
         # 🧼 Clean balance sheet
         summary_df = extract_balance_sheet_summary(df)
         st.markdown("### 📊 Cleaned Balance Sheet Summary")
         st.dataframe(summary_df)
 
-        # 📈 Plot all metrics
         for col in summary_df.columns.drop("Fiscal Year"):
             fig = px.line(summary_df, x="Fiscal Year", y=col, markers=True, title=f"{col} Over Time")
             st.plotly_chart(fig, use_container_width=True)
 
-        # 📌 Compute and display ratios
+        # 📌 Financial Ratios
         st.markdown("### 📈 Financial Ratios Over Time")
         ratios = []
         for _, row in summary_df.iterrows():
             total_liab = row["Short-Term Liabilities"] + row["Long-Term Liabilities"]
             equity = row["Total Owner's Equity"]
             year = row["Fiscal Year"]
-            debt_equity = round(total_liab / equity, 2) if equity else None
-            equity_ratio = round(equity / (total_liab + equity), 2) if (total_liab + equity) else None
+
+            # Handle division by zero or missing data
+            debt_equity = round(total_liab / equity, 2) if equity and equity != 0 else float("nan")
+            equity_ratio = round(equity / (total_liab + equity), 2) if (total_liab + equity) != 0 else float("nan")
+
             ratios.append({
                 "Fiscal Year": year,
                 "Debt to Equity": debt_equity,
@@ -130,17 +132,21 @@ if uploaded_file:
         st.plotly_chart(fig1, use_container_width=True)
         st.plotly_chart(fig2, use_container_width=True)
 
-        # 📏 Industry Benchmark Comparison
+        # 🔍 Debug: Show last year values
+        st.markdown("### 🔍 Last Year Input Values")
+        st.write(summary_df.iloc[-1])
+
+        # 🧮 Industry Comparison
         if industry in industry_benchmarks:
             st.markdown(f"### 🧮 Industry Benchmark Comparison for `{industry}`")
             bench = industry_benchmarks[industry]
             latest = ratio_df.iloc[-1]
             for metric in ["Debt to Equity", "Equity Ratio"]:
                 val = latest[metric]
-                delta = round(val - bench[metric], 2)
+                delta = round(val - bench[metric], 2) if pd.notna(val) else "N/A"
                 st.metric(label=metric, value=val, delta=delta)
         else:
-            st.warning("⚠️ Industry benchmark not available for this classification.")
+            st.warning("⚠️ No benchmarks for this industry.")
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
