@@ -1,27 +1,66 @@
-import streamlit as st
 import pandas as pd
-from balance_sheet_utils import extract_clean_balance_sheet
 
-st.subheader("📥 Upload Balance Sheet")
-uploaded_file = st.file_uploader("Upload Excel or CSV file", type=["xlsx", "csv"])
+def extract_clean_balance_sheet(df):
+    # Standardize column names and string types
+    df.columns = [str(col) for col in df.columns]
+    df = df.astype(str)
 
-if uploaded_file:
-    if uploaded_file.name.endswith('.csv'):
-        raw_df = pd.read_csv(uploaded_file, header=None)
-    else:
-        raw_df = pd.read_excel(uploaded_file, header=None)
+    # Store extracted values
+    balance_data = {
+        "Short-Term Liabilities": 0.0,
+        "Long-Term Liabilities": 0.0,
+        "Owner's Investment": 0.0,
+        "Retained Earnings": 0.0
+    }
 
-    try:
-        clean_df = extract_clean_balance_sheet(raw_df)
+    # Extract values based on row text
+    for _, row in df.iterrows():
+        row_str = " ".join(row).lower()
+        # Match and extract numbers
+        if "short-term liabilities" in row_str:
+            try:
+                balance_data["Short-Term Liabilities"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
+            except:
+                pass
+        elif "total long-term liabilities" in row_str:
+            try:
+                balance_data["Long-Term Liabilities"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
+            except:
+                pass
+        elif "owner's investment" in row_str:
+            try:
+                balance_data["Owner's Investment"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
+            except:
+                pass
+        elif "retained earnings" in row_str:
+            try:
+                balance_data["Retained Earnings"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
+            except:
+                pass
 
-        st.success("✅ Balance Sheet Processed Successfully")
-        st.dataframe(clean_df)
+    # Compute totals
+    total_liabilities = balance_data["Short-Term Liabilities"] + balance_data["Long-Term Liabilities"]
+    total_equity = balance_data["Owner's Investment"] + balance_data["Retained Earnings"]
+    total_liabilities_equity = total_liabilities + total_equity
 
-        if abs(clean_df.loc[4, "Amount"] - clean_df["Amount"].sum() + clean_df.loc[4, "Amount"]) > 0.01:
-            st.warning("⚠️ Warning: Totals do not match actual item sums. Please verify data integrity.")
+    # Return a cleaned summary table
+    clean_df = pd.DataFrame({
+        "Category": [
+            "Short-Term Liabilities",
+            "Long-Term Liabilities",
+            "Owner's Investment",
+            "Retained Earnings",
+            "Total Owner's Equity",
+            "Total Liabilities & Equity"
+        ],
+        "Amount": [
+            balance_data["Short-Term Liabilities"],
+            balance_data["Long-Term Liabilities"],
+            balance_data["Owner's Investment"],
+            balance_data["Retained Earnings"],
+            total_equity,
+            total_liabilities_equity
+        ]
+    })
 
-        # Optional: Visual chart
-        st.bar_chart(clean_df.set_index("Category"))
-
-    except Exception as e:
-        st.error(f"❌ Failed to process balance sheet: {e}")
+    return clean_df
