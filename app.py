@@ -83,14 +83,13 @@ def plot_ratio_comparison(firm_value, benchmark, ratio_name):
     if pd.isna(firm_value) or pd.isna(benchmark):
         return
 
-    # Vibrant color palette
+    # Vibrant colors
     COLORS = {
         "green": "#2ECC40",   # bright green
         "red": "#FF4136",     # vivid red
         "yellow": "#FFDC00"   # bold yellow
     }
 
-    # Color logic
     if abs(firm_value - benchmark) <= 0.05 * benchmark:
         firm_color = COLORS["yellow"]
         benchmark_color = COLORS["yellow"]
@@ -192,3 +191,32 @@ if uploaded_file:
         st.subheader("💬 Gemini Commentary")
         with st.spinner("Generating insights..."):
             st.markdown(ai_commentary(df, industry))
+
+        # 📊 BALANCE SHEET & INCOME STATEMENT TABLES + GRAPHS
+        st.header("📄 Balance Sheet and Income Statement Over Time")
+
+        bs_fields = ["Fiscal Year", "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"]
+        is_fields = ["Fiscal Year", "Revenue", "Net Profit"]
+
+        if all(col in df.columns for col in bs_fields[1:]):
+            st.subheader("📘 Balance Sheet")
+            st.dataframe(df[bs_fields])
+
+            bs_melted = df[bs_fields].melt(id_vars="Fiscal Year", var_name="Account", value_name="Amount")
+            fig_bs = px.line(bs_melted, x="Fiscal Year", y="Amount", color="Account", markers=True, title="Balance Sheet Components Over Time")
+            fig_bs.update_layout(legend_title_text="Account")
+            st.plotly_chart(fig_bs, use_container_width=True)
+        else:
+            st.warning("⚠️ Missing data to display full Balance Sheet.")
+
+        if all(col in df.columns for col in is_fields[1:]):
+            st.subheader("📙 Income Statement")
+            st.dataframe(df[is_fields])
+
+            is_melted = df[is_fields].melt(id_vars="Fiscal Year", var_name="Metric", value_name="Amount")
+            fig_is = px.bar(is_melted, x="Fiscal Year", y="Amount", color="Metric", barmode="group", text_auto=True,
+                            title="Income Statement Components Over Time")
+            fig_is.update_layout(legend_title_text="Metric")
+            st.plotly_chart(fig_is, use_container_width=True)
+        else:
+            st.warning("⚠️ Missing data to display full Income Statement.")
