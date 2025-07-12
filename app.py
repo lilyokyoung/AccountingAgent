@@ -195,3 +195,4 @@ Question: {question}
             answer = model.generate_content(full_prompt)
             st.markdown("**🧾 Answer:**")
             st.markdown(answer.text)
+ 
