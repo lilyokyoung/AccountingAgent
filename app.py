@@ -52,9 +52,18 @@ def compute_ratios(df):
     df["Total Liabilities"] = df["Short-Term Liabilities"] + df["Long-Term Liabilities"]
     df["Debt-to-Equity Ratio"] = df["Total Liabilities"] / df["Owner's Equity"]
     df["Equity Ratio"] = df["Owner's Equity"] / (df["Total Liabilities"] + df["Owner's Equity"])
-    df["Current Ratio"] = df["Current Assets"] / df["Short-Term Liabilities"] if "Current Assets" in df.columns else None
-    df["ROE"] = df["Net Profit"] / df["Owner's Equity"] if "Net Profit" in df.columns else None
-    df["Net Profit Margin"] = df["Net Profit"] / df["Revenue"] if "Revenue" in df.columns and "Net Profit" in df.columns else None
+    df["Current Ratio"] = (
+        df["Current Assets"] / df["Short-Term Liabilities"]
+        if "Current Assets" in df.columns else None
+    )
+    df["ROE"] = (
+        df["Net Profit"] / df["Owner's Equity"]
+        if "Net Profit" in df.columns else None
+    )
+    df["Net Profit Margin"] = (
+        df["Net Profit"] / df["Revenue"]
+        if "Net Profit" in df.columns and "Revenue" in df.columns else None
+    )
     return df
 
 def ai_commentary(df, industry):
@@ -126,6 +135,10 @@ if uploaded_file:
                 [None] + list(df.columns),
                 index=([None] + list(df.columns)).index(current_val) if current_val else 0
             )
+
+    missing_cols = [key for key in expected_fields if not col_map[key]]
+    if missing_cols:
+        st.warning(f"⚠️ Missing columns for full analysis: {', '.join(missing_cols)}")
 
     essential_cols = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
     if not all(col_map[c] for c in essential_cols):
