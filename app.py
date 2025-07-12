@@ -1,77 +1,73 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import io
+import plotly.express as px
 
 st.set_page_config(page_title="📊 Financial Ratio Trend Analyzer", layout="wide")
-
 st.title("🏢 Balance Sheet Analyzer with Ratio Trends")
 
-uploaded_file = st.file_uploader("📂 Upload Balance Sheet Excel", type=["xlsx"])
+uploaded_file = st.file_uploader("📂 Upload Balance Sheet Excel", type=["xlsx", "csv"])
 
 if uploaded_file:
-    company_name = uploaded_file.name.replace(".xlsx", "")
+    company_name = uploaded_file.name.replace(".xlsx", "").replace(".csv", "")
     st.markdown(f"**Detected Company:** `{company_name}`")
 
-    # Load Excel
-    df = pd.read_excel(uploaded_file)
+    # Load file
+    df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
 
-    # Try to identify column matches
-    col_map = {}
-    possible_fields = {
-        "Short-Term Liabilities": ["short", "current"],
-        "Long-Term Liabilities": ["long", "non current"],
-        "Owner's Equity": ["equity", "net worth"],
+    # Detect fiscal year column (first column assumed)
+    df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
+
+    # Match relevant fields
+    field_map = {
+        "Short-Term Liabilities": None,
+        "Long-Term Liabilities": None,
+        "Owner's Equity": None
     }
 
-    for field, keywords in possible_fields.items():
-        for col in df.columns:
-            if any(k.lower() in str(col).lower() for k in keywords):
-                col_map[field] = col
-                st.success(f"✅ Matched **{field}** to column: `{col}`")
-                break
-        if field not in col_map:
-            st.error(f"❌ No match found for **{field}**")
+    for col in df.columns:
+        col_lower = col.lower()
+        if not field_map["Short-Term Liabilities"] and "short" in col_lower or "current" in col_lower:
+            field_map["Short-Term Liabilities"] = col
+        elif not field_map["Long-Term Liabilities"] and "long" in col_lower or "non" in col_lower:
+            field_map["Long-Term Liabilities"] = col
+        elif not field_map["Owner's Equity"] and ("equity" in col_lower or "net worth" in col_lower):
+            field_map["Owner's Equity"] = col
 
-    # Continue only if all required columns are found
-    if len(col_map) == len(possible_fields):
-        data = df[[col_map["Short-Term Liabilities"], col_map["Long-Term Liabilities"], col_map["Owner's Equity"]]].copy()
-        data.columns = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
-        data["Fiscal Year"] = df[df.columns[0]]
+    # Show match results
+    for key, col in field_map.items():
+        if col:
+            st.success(f"✅ Matched `{key}` to column: `{col}`")
+        else:
+            st.error(f"❌ No match found for `{key}`")
 
-        st.subheader("📋 Cleaned Balance Sheet Summary")
-        st.dataframe(data)
+    if all(field_map.values()):
+        df_calc = df[["Fiscal Year", *field_map.values()]].copy()
+        df_calc.columns = ["Fiscal Year", "STL", "LTL", "Equity"]
 
         # Calculate ratios
-        data["Debt-to-Equity Ratio"] = (data["Short-Term Liabilities"] + data["Long-Term Liabilities"]) / data["Owner's Equity"]
-        data["Equity Ratio"] = data["Owner's Equity"] / (
-            data["Short-Term Liabilities"] + data["Long-Term Liabilities"] + data["Owner's Equity"]
-        )
+        df_calc["Total Liabilities"] = df_calc["STL"] + df_calc["LTL"]
+        df_calc["Debt-to-Equity Ratio"] = df_calc["Total Liabilities"] / df_calc["Equity"]
+        df_calc["Equity Ratio"] = df_calc["Equity"] / (df_calc["Total Liabilities"] + df_calc["Equity"])
+
+        st.subheader("📋 Cleaned Data")
+        st.dataframe(df_calc)
 
         st.subheader("📊 Key Ratios (Latest Year)")
-        latest = data.iloc[-1]
+        latest = df_calc.iloc[-1]
         col1, col2 = st.columns(2)
-        col1.metric("Debt-to-Equity Ratio", f"{latest['Debt-to-Equity Ratio']:.2f}")
+        col1.metric("Debt-to-Equity", f"{latest['Debt-to-Equity Ratio']:.2f}")
         col2.metric("Equity Ratio", f"{latest['Equity Ratio']:.2f}")
 
-        # Plot Trends
+        # Trend charts
         st.subheader("📈 Ratio Trends")
 
-        fig1, ax1 = plt.subplots()
-        ax1.plot(data["Fiscal Year"], data["Debt-to-Equity Ratio"], marker='o')
-        ax1.set_title("Debt-to-Equity Ratio Trend")
-        ax1.set_xlabel("Year")
-        ax1.set_ylabel("Ratio")
-        ax1.grid(True)
-        st.pyplot(fig1)
+        fig1 = px.line(df_calc, x="Fiscal Year", y="Debt-to-Equity Ratio", markers=True,
+                       title="Debt-to-Equity Ratio Over Time")
+        st.plotly_chart(fig1, use_container_width=True)
 
-        fig2, ax2 = plt.subplots()
-        ax2.plot(data["Fiscal Year"], data["Equity Ratio"], marker='o', color='green')
-        ax2.set_title("Equity Ratio Trend")
-        ax2.set_xlabel("Year")
-        ax2.set_ylabel("Ratio")
-        ax2.grid(True)
-        st.pyplot(fig2)
+        fig2 = px.line(df_calc, x="Fiscal Year", y="Equity Ratio", markers=True,
+                       title="Equity Ratio Over Time")
+        st.plotly_chart(fig2, use_container_width=True)
 
     else:
-        st.warning("🚨 Some fields could not be matched. Please check your file format and headers.")
+        st.warning("⚠️ Some columns are missing. Please upload a file with consistent column names.")
