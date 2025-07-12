@@ -1,56 +1,40 @@
+import streamlit as st
 import pandas as pd
 
-def extract_clean_balance_sheet(df):
-    # Convert all values to lowercase strings and strip spaces
-    df = df.astype(str).apply(lambda x: x.str.strip().str.lower())
+# App config
+st.set_page_config(page_title="📊 Accounting Agent", layout="wide")
+st.title("📊 Accounting Agent")
+st.markdown("Upload a firm's balance sheet to extract, audit, and visualize the financial structure.")
 
-    # Define matching keywords for each target line item
-    keywords = {
-        "Short-Term Liabilities": ["short term liabilities", "short-term liabilities", "current liabilities"],
-        "Long-Term Liabilities": ["long term liabilities", "long-term liabilities", "non current liabilities"],
-        "Owner's Investment": ["owner investment", "owner's investment", "capital contributed"],
-        "Retained Earnings": ["retained earnings", "accumulated earnings", "reserves"]
-    }
+# Safe import
+try:
+    from balance_sheet_utils import extract_clean_balance_sheet
+except Exception as e:
+    st.error(f"❌ Failed to import balance sheet parser: {e}")
+    st.stop()
 
-    # Initialize values
-    values = {k: 0.0 for k in keywords}
+# File uploader
+uploaded_file = st.file_uploader("📤 Upload Balance Sheet File (.xlsx or .csv)", type=["xlsx", "csv"])
 
-    # Search rows for matches and extract numbers
-    for i, row in df.iterrows():
-        row_text = " ".join(row)
-        for label, patterns in keywords.items():
-            for pattern in patterns:
-                if pattern in row_text:
-                    try:
-                        # Find the first numeric value in the row
-                        numeric_values = [x for x in row if x.replace('.', '', 1).replace(',', '').isdigit()]
-                        if numeric_values:
-                            values[label] = float(numeric_values[0].replace(',', ''))
-                    except Exception as e:
-                        print(f"Error extracting {label} from row {i}: {e}")
+if not uploaded_file:
+    st.info("👈 Please upload a file to begin.")
+    st.stop()
 
-    # Compute totals
-    total_equity = values["Owner's Investment"] + values["Retained Earnings"]
-    total_liab_eq = values["Short-Term Liabilities"] + values["Long-Term Liabilities"] + total_equity
+# Load the file
+try:
+    df = pd.read_excel(uploaded_file, header=None) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file, header=None)
+except Exception as e:
+    st.error(f"❌ Could not read file: {e}")
+    st.stop()
 
-    # Prepare DataFrame
-    summary = pd.DataFrame({
-        "Category": [
-            "Short-Term Liabilities",
-            "Long-Term Liabilities",
-            "Owner's Investment",
-            "Retained Earnings",
-            "Total Owner's Equity",
-            "Total Liabilities & Equity"
-        ],
-        "Amount": [
-            values["Short-Term Liabilities"],
-            values["Long-Term Liabilities"],
-            values["Owner's Investment"],
-            values["Retained Earnings"],
-            total_equity,
-            total_liab_eq
-        ]
-    })
+# Parse balance sheet
+try:
+    clean_df = extract_clean_balance_sheet(df)
+    st.subheader("📘 Cleaned Balance Sheet Summary")
+    st.dataframe(clean_df, use_container_width=True)
 
-    return summary
+    if clean_df["Amount"].sum() == 0:
+        st.warning("⚠️ All values extracted are zero. Please check that the row labels in your file match expected terms like 'retained earnings', 'owner's investment', etc.")
+
+except Exception as e:
+    st.error(f"❌ Failed to extract balance sheet values: {e}")
