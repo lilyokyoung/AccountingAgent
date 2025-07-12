@@ -3,40 +3,39 @@ import streamlit as st
 import plotly.express as px
 import os
 
-# ---------- 🔍 Helper Functions ----------
+# ---------- 🔍 Company Detection from Filename ----------
 
-def extract_company_name(df):
-    for i in range(min(5, len(df))):
-        for j in range(min(3, len(df.columns))):
-            val = str(df.iloc[i, j]).strip().lower()
-            if any(x in val for x in ["ltd", "limited", "inc", "corporation", "company", "fonterra", "bank", "air", "energy"]):
-                return df.iloc[i, j].strip()
+def extract_company_name_from_filename(uploaded_file):
+    filename = uploaded_file.name.lower()
+    company_keywords = ["fonterra", "airnz", "anz", "asb", "fisher", "zenergy", "mainfreight", "kiwibank"]
+    for keyword in company_keywords:
+        if keyword in filename:
+            return keyword.capitalize()
     return "Unknown"
 
 def map_company_to_industry(company_name):
     company_industry_map = {
-        "fonterra": "Dairy",
-        "air new zealand": "Aviation",
-        "anz": "Banking",
-        "asb": "Banking",
-        "z energy": "Energy",
-        "fisher & paykel": "Healthcare",
-        "kiwibank": "Banking",
-        "mainfreight": "Logistics",
-        "unknown": "Unknown"
+        "Fonterra": "Dairy",
+        "Airnz": "Aviation",
+        "Anz": "Banking",
+        "Asb": "Banking",
+        "Zenergy": "Energy",
+        "Fisher": "Healthcare",
+        "Mainfreight": "Logistics",
+        "Kiwibank": "Banking"
     }
-    name = company_name.lower()
-    for key in company_industry_map:
-        if key in name:
-            return company_industry_map[key]
-    return "Unknown"
+    return company_industry_map.get(company_name, "Unknown")
 
 industry_benchmarks = {
     "Dairy": {"Debt to Equity": 1.5, "Equity Ratio": 0.4},
     "Banking": {"Debt to Equity": 9.0, "Equity Ratio": 0.1},
     "Aviation": {"Debt to Equity": 3.5, "Equity Ratio": 0.25},
-    "Healthcare": {"Debt to Equity": 0.8, "Equity Ratio": 0.55}
+    "Healthcare": {"Debt to Equity": 0.8, "Equity Ratio": 0.55},
+    "Logistics": {"Debt to Equity": 2.0, "Equity Ratio": 0.3},
+    "Energy": {"Debt to Equity": 1.8, "Equity Ratio": 0.35}
 }
+
+# ---------- 🧽 Balance Sheet Extraction ----------
 
 def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = df.columns.astype(str).str.strip().str.lower()
@@ -70,10 +69,10 @@ def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     return cleaned
 
-# ---------- 📊 Streamlit App ----------
+# ---------- 🚀 Streamlit App ----------
 
 st.set_page_config(page_title="📊 Industry Ratio Analyzer", layout="wide")
-st.title("📁 Financial Statement Analyzer with Industry Comparison")
+st.title("📁 Financial Statement Analyzer with Industry Benchmarking")
 
 uploaded_file = st.file_uploader("Upload your Balance Sheet (Excel/CSV)", type=["csv", "xlsx"])
 
@@ -85,21 +84,30 @@ if uploaded_file:
         st.markdown("### 🧾 Raw Data Preview")
         st.dataframe(df.head())
 
-        company_name = extract_company_name(df)
+        # 🏢 Auto-detect company and industry
+        company_name = extract_company_name_from_filename(uploaded_file)
         industry = map_company_to_industry(company_name)
 
-        st.markdown(f"**🏢 Detected Company:** `{company_name}`")
+        # 🔁 Manual fallback
+        if company_name == "Unknown":
+            company_name = st.text_input("🏢 Enter Company Name:")
+        if industry == "Unknown":
+            industry = st.selectbox("🏷️ Select Industry:", list(industry_benchmarks.keys()))
+
+        st.markdown(f"**🏢 Detected/Entered Company:** `{company_name}`")
         st.markdown(f"**🏷️ Industry Classification:** `{industry}`")
 
+        # 🧼 Clean balance sheet
         summary_df = extract_balance_sheet_summary(df)
-        st.markdown("### 📉 Cleaned Balance Sheet Summary")
+        st.markdown("### 📊 Cleaned Balance Sheet Summary")
         st.dataframe(summary_df)
 
-        numeric_cols = summary_df.columns.drop("Fiscal Year")
-        for col in numeric_cols:
+        # 📈 Plot all metrics
+        for col in summary_df.columns.drop("Fiscal Year"):
             fig = px.line(summary_df, x="Fiscal Year", y=col, markers=True, title=f"{col} Over Time")
             st.plotly_chart(fig, use_container_width=True)
 
+        # 📌 Compute and display ratios
         st.markdown("### 📈 Financial Ratios Over Time")
         ratios = []
         for _, row in summary_df.iterrows():
@@ -117,11 +125,12 @@ if uploaded_file:
         ratio_df = pd.DataFrame(ratios)
         st.dataframe(ratio_df)
 
-        fig1 = px.line(ratio_df, x="Fiscal Year", y="Debt to Equity", markers=True, title="Debt to Equity Ratio Over Time")
+        fig1 = px.line(ratio_df, x="Fiscal Year", y="Debt to Equity", markers=True, title="Debt to Equity Over Time")
         fig2 = px.line(ratio_df, x="Fiscal Year", y="Equity Ratio", markers=True, title="Equity Ratio Over Time")
         st.plotly_chart(fig1, use_container_width=True)
         st.plotly_chart(fig2, use_container_width=True)
 
+        # 📏 Industry Benchmark Comparison
         if industry in industry_benchmarks:
             st.markdown(f"### 🧮 Industry Benchmark Comparison for `{industry}`")
             bench = industry_benchmarks[industry]
