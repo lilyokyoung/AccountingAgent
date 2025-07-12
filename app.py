@@ -1,93 +1,77 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import matplotlib.pyplot as plt
+import io
 
-# ---------------- Utility Functions ---------------- #
+st.set_page_config(page_title="📊 Financial Ratio Trend Analyzer", layout="wide")
 
-def normalize(text):
-    return ''.join(e for e in str(text).lower().strip() if e.isalnum())
+st.title("🏢 Balance Sheet Analyzer with Ratio Trends")
 
-def match_columns(df, target_map):
-    found = {}
-    normalized_columns = {normalize(col): col for col in df.columns}
-    for target, options in target_map.items():
-        found[target] = None
-        for opt in options:
-            norm_opt = normalize(opt)
-            for norm_col, original_col in normalized_columns.items():
-                if norm_opt in norm_col:
-                    found[target] = original_col
-                    break
-            if found[target]:
-                break
-    return found
-
-# ---------------- Streamlit App ---------------- #
-
-st.set_page_config(page_title="📊 Accounting Agent", layout="wide")
-st.title("📁 Upload Balance Sheet File")
-
-uploaded_file = st.file_uploader("Upload Excel or CSV", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("📂 Upload Balance Sheet Excel", type=["xlsx"])
 
 if uploaded_file:
-    filename = uploaded_file.name
-    st.markdown(f"🏢 **Detected Company:** `{filename.replace('.xlsx','').replace('.csv','')}`")
+    company_name = uploaded_file.name.replace(".xlsx", "")
+    st.markdown(f"**Detected Company:** `{company_name}`")
 
-    df = pd.read_excel(uploaded_file) if filename.endswith(".xlsx") else pd.read_csv(uploaded_file)
+    # Load Excel
+    df = pd.read_excel(uploaded_file)
 
-    with st.expander("📂 View Raw Data"):
-        st.dataframe(df)
-
-    # Expected Concepts
-    concept_map = {
-        "Short-Term Liabilities": ["short term liabilities", "current liabilities"],
-        "Long-Term Liabilities": ["long term liabilities", "non current liabilities"],
-        "Owner's Equity": ["owner's equity", "total equity", "net worth"],
-        "Retained Earnings": ["retained earnings"],
-        "Year": ["fiscal year", "year", "period"]
+    # Try to identify column matches
+    col_map = {}
+    possible_fields = {
+        "Short-Term Liabilities": ["short", "current"],
+        "Long-Term Liabilities": ["long", "non current"],
+        "Owner's Equity": ["equity", "net worth"],
     }
 
-    matches = match_columns(df, concept_map)
-    for k, v in matches.items():
-        if v:
-            st.success(f"✅ Matched **{k}** to column: `{v}`")
-        else:
-            st.error(f"❌ No match for **{k}**")
+    for field, keywords in possible_fields.items():
+        for col in df.columns:
+            if any(k.lower() in str(col).lower() for k in keywords):
+                col_map[field] = col
+                st.success(f"✅ Matched **{field}** to column: `{col}`")
+                break
+        if field not in col_map:
+            st.error(f"❌ No match found for **{field}**")
 
-    # Extract matched columns
-    if all(matches[k] for k in ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Year"]):
-        df_clean = df[[matches["Year"],
-                       matches["Short-Term Liabilities"],
-                       matches["Long-Term Liabilities"],
-                       matches["Owner's Equity"]]].copy()
-        df_clean.columns = ["Year", "STL", "LTL", "Equity"]
-        df_clean = df_clean.dropna()
+    # Continue only if all required columns are found
+    if len(col_map) == len(possible_fields):
+        data = df[[col_map["Short-Term Liabilities"], col_map["Long-Term Liabilities"], col_map["Owner's Equity"]]].copy()
+        data.columns = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
+        data["Fiscal Year"] = df[df.columns[0]]
 
-        # Compute ratios
-        df_clean["Debt_to_Equity"] = (df_clean["STL"] + df_clean["LTL"]) / df_clean["Equity"]
-        df_clean["Equity_Ratio"] = df_clean["Equity"] / (df_clean["STL"] + df_clean["LTL"] + df_clean["Equity"])
+        st.subheader("📋 Cleaned Balance Sheet Summary")
+        st.dataframe(data)
 
-        # Summary
-        st.markdown("## 📊 Cleaned Balance Sheet Summary")
-        st.dataframe(df_clean)
+        # Calculate ratios
+        data["Debt-to-Equity Ratio"] = (data["Short-Term Liabilities"] + data["Long-Term Liabilities"]) / data["Owner's Equity"]
+        data["Equity Ratio"] = data["Owner's Equity"] / (
+            data["Short-Term Liabilities"] + data["Long-Term Liabilities"] + data["Owner's Equity"]
+        )
 
-        # Key ratios (latest year)
-        latest = df_clean.iloc[-1]
-        st.markdown("## 🔍 Key Ratios (Latest Year)")
+        st.subheader("📊 Key Ratios (Latest Year)")
+        latest = data.iloc[-1]
         col1, col2 = st.columns(2)
-        col1.metric("Debt-to-Equity", round(latest["Debt_to_Equity"], 2))
-        col2.metric("Equity Ratio", round(latest["Equity_Ratio"], 2))
+        col1.metric("Debt-to-Equity Ratio", f"{latest['Debt-to-Equity Ratio']:.2f}")
+        col2.metric("Equity Ratio", f"{latest['Equity Ratio']:.2f}")
 
-        # Trend Charts
-        st.markdown("## 📈 Ratio Trends Over Time")
+        # Plot Trends
+        st.subheader("📈 Ratio Trends")
 
-        fig1 = px.line(df_clean, x="Year", y="Debt_to_Equity", markers=True,
-                       title="📉 Debt-to-Equity Ratio Trend")
-        fig2 = px.line(df_clean, x="Year", y="Equity_Ratio", markers=True,
-                       title="📈 Equity Ratio Trend")
+        fig1, ax1 = plt.subplots()
+        ax1.plot(data["Fiscal Year"], data["Debt-to-Equity Ratio"], marker='o')
+        ax1.set_title("Debt-to-Equity Ratio Trend")
+        ax1.set_xlabel("Year")
+        ax1.set_ylabel("Ratio")
+        ax1.grid(True)
+        st.pyplot(fig1)
 
-        st.plotly_chart(fig1, use_container_width=True)
-        st.plotly_chart(fig2, use_container_width=True)
+        fig2, ax2 = plt.subplots()
+        ax2.plot(data["Fiscal Year"], data["Equity Ratio"], marker='o', color='green')
+        ax2.set_title("Equity Ratio Trend")
+        ax2.set_xlabel("Year")
+        ax2.set_ylabel("Ratio")
+        ax2.grid(True)
+        st.pyplot(fig2)
 
     else:
-        st.warning("⚠️ Not all necessary fields were matched. Trend analysis cannot proceed.")
+        st.warning("🚨 Some fields could not be matched. Please check your file format and headers.")
