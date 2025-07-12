@@ -27,7 +27,6 @@ INDUSTRY_BENCHMARKS = {
     }
 }
 
-# 🧠 Fuzzy match helper
 def fuzzy_match(target, columns, cutoff=0.6):
     match = difflib.get_close_matches(target, columns, n=1, cutoff=cutoff)
     return match[0] if match else None
@@ -52,18 +51,9 @@ def compute_ratios(df):
     df["Total Liabilities"] = df["Short-Term Liabilities"] + df["Long-Term Liabilities"]
     df["Debt-to-Equity Ratio"] = df["Total Liabilities"] / df["Owner's Equity"]
     df["Equity Ratio"] = df["Owner's Equity"] / (df["Total Liabilities"] + df["Owner's Equity"])
-    df["Current Ratio"] = (
-        df["Current Assets"] / df["Short-Term Liabilities"]
-        if "Current Assets" in df.columns else None
-    )
-    df["ROE"] = (
-        df["Net Profit"] / df["Owner's Equity"]
-        if "Net Profit" in df.columns else None
-    )
-    df["Net Profit Margin"] = (
-        df["Net Profit"] / df["Revenue"]
-        if "Net Profit" in df.columns and "Revenue" in df.columns else None
-    )
+    df["Current Ratio"] = df["Current Assets"] / df["Short-Term Liabilities"] if "Current Assets" in df.columns else None
+    df["ROE"] = df["Net Profit"] / df["Owner's Equity"] if "Net Profit" in df.columns else None
+    df["Net Profit Margin"] = df["Net Profit"] / df["Revenue"] if "Net Profit" in df.columns and "Revenue" in df.columns else None
     return df
 
 def ai_commentary(df, industry):
@@ -90,12 +80,35 @@ def compare_to_benchmark(value, benchmark):
         return "🔴 Below"
 
 def plot_ratio_comparison(firm_value, benchmark, ratio_name):
+    if pd.isna(firm_value) or pd.isna(benchmark):
+        return
+
+    if abs(firm_value - benchmark) <= 0.05 * benchmark:
+        firm_color = "gold"
+    elif firm_value > benchmark:
+        firm_color = "green"
+    else:
+        firm_color = "red"
+
     df_plot = pd.DataFrame({
-        "Source": ["Your Firm", "Industry Benchmark"],
-        ratio_name: [firm_value, benchmark]
+        "Label": [f"{ratio_name}"],
+        "Your Firm": [firm_value],
+        "Industry Benchmark": [benchmark]
     })
-    fig = px.bar(df_plot, x="Source", y=ratio_name, color="Source",
-                 text_auto=True, title=f"{ratio_name} Comparison")
+    df_melted = df_plot.melt(id_vars="Label", var_name="Source", value_name="Value")
+
+    fig = px.bar(
+        df_melted,
+        x="Source",
+        y="Value",
+        color="Source",
+        color_discrete_map={
+            "Your Firm": firm_color,
+            "Industry Benchmark": "gray"
+        },
+        text_auto=True,
+        title=f"{ratio_name} vs Industry Benchmark"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # 📂 Upload
@@ -112,7 +125,6 @@ if uploaded_file:
     st.markdown(f"🏢 **Detected Company:** `{uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}`")
     st.markdown(f"🏷️ **Industry:** `{industry}`")
 
-    # 🎯 Fuzzy matching expected fields
     expected_fields = {
         "Short-Term Liabilities": "Short-Term Liabilities",
         "Long-Term Liabilities": "Long-Term Liabilities",
@@ -122,12 +134,10 @@ if uploaded_file:
         "Revenue": "Revenue"
     }
 
-    col_map = {}
     for key, expected in expected_fields.items():
         match = fuzzy_match(expected, df.columns)
         if match:
             df = df.rename(columns={match: key})
-            col_map[key] = key
 
     missing_cols = [k for k in ["Current Assets", "Net Profit", "Revenue"] if k not in df.columns]
     if missing_cols:
@@ -142,12 +152,19 @@ if uploaded_file:
         st.subheader("📋 Ratio Table (All Years)")
         st.dataframe(df[["Fiscal Year", "Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]])
 
-        st.subheader("📈 Ratio Trends")
-        for ratio in ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]:
-            if ratio in df.columns and df[ratio].notna().any():
-                fig = px.line(df, x="Fiscal Year", y=ratio, markers=True, title=ratio)
-                st.plotly_chart(fig, use_container_width=True)
+        # ✅ Unified Trend Chart
+        st.subheader("📈 All Ratio Trends Over Time")
+        ratio_cols = ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]
+        available = [r for r in ratio_cols if r in df.columns and df[r].notna().any()]
+        if available:
+            df_melted = df[["Fiscal Year"] + available].melt(id_vars="Fiscal Year", var_name="Ratio", value_name="Value")
+            fig = px.line(df_melted, x="Fiscal Year", y="Value", color="Ratio", markers=True, title="Financial Ratios Over Time")
+            fig.update_layout(legend_title_text="Ratio")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No ratios available to plot.")
 
+        # 🧮 Industry comparison with color-coded bars
         if industry in INDUSTRY_BENCHMARKS:
             st.subheader(f"🧮 Benchmark Comparison – {industry}")
             latest = df.iloc[-1]
