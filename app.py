@@ -4,16 +4,17 @@ import plotly.express as px
 import google.generativeai as genai
 import difflib
 
-# Page configuration
+# Page setup
 st.set_page_config(page_title="📊 Accounting Analyzer", layout="wide")
 
-# Add background highlight style for company/industry section only
+# ⬛ Black background styling for company info box
 HIGHLIGHT_STYLE = """
 <style>
 .info-box {
-    background-color: #e3f2fd;
+    background-color: #000000;
+    color: #ffffff;
     padding: 15px 20px;
-    border-left: 6px solid #2196F3;
+    border-left: 6px solid #FF5722;
     margin-top: 15px;
     border-radius: 5px;
     font-size: 20px;
@@ -21,31 +22,23 @@ HIGHLIGHT_STYLE = """
 </style>
 """
 
-# API config
+# Gemini config
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
-
-# App title
 st.title("📈 Financial Statement Analyzer")
 
 # Benchmarks
 INDUSTRY_BENCHMARKS = {
     "Dairy": {
-        "Debt-to-Equity Ratio": 1.20,
-        "Equity Ratio": 0.45,
-        "Current Ratio": 1.80,
-        "ROE": 0.12,
-        "Net Profit Margin": 0.08
+        "Debt-to-Equity Ratio": 1.20, "Equity Ratio": 0.45,
+        "Current Ratio": 1.80, "ROE": 0.12, "Net Profit Margin": 0.08
     },
     "Tech": {
-        "Debt-to-Equity Ratio": 0.50,
-        "Equity Ratio": 0.70,
-        "Current Ratio": 2.50,
-        "ROE": 0.15,
-        "Net Profit Margin": 0.20
+        "Debt-to-Equity Ratio": 0.50, "Equity Ratio": 0.70,
+        "Current Ratio": 2.50, "ROE": 0.15, "Net Profit Margin": 0.20
     }
 }
 
-# Functions
+# Utilities
 def fuzzy_match(target, columns, cutoff=0.6):
     match = difflib.get_close_matches(target, columns, n=1, cutoff=cutoff)
     return match[0] if match else None
@@ -80,14 +73,12 @@ Compare them to industry averages and offer brief recommendations."""
     response = genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt)
     return response.text.strip()
 
-# Upload section
+# 📂 Upload
 uploaded_file = st.file_uploader("📂 Upload Excel/CSV", type=["xlsx", "csv"])
-
 if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
     df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
 
-    # Fuzzy column mapping
     fields = {
         "Short-Term Liabilities": None, "Long-Term Liabilities": None,
         "Owner's Equity": None, "Current Assets": None,
@@ -99,32 +90,25 @@ if uploaded_file:
         if match:
             df.rename(columns={match: field}, inplace=True)
 
-    # Detect industry
     industry = detect_industry(uploaded_file.name)
 
-    # Inject highlight style
+    # Inject custom style and display company info box
     st.markdown(HIGHLIGHT_STYLE, unsafe_allow_html=True)
-
-    # Display detected firm and industry
     st.markdown(
         f"""
         <div class="info-box">
         🏢 <strong>Detected Company:</strong> {uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}<br>
         🏷️ <strong>Industry:</strong> {industry}
         </div>
-        """,
-        unsafe_allow_html=True
+        """, unsafe_allow_html=True
     )
 
-    # Compute and show ratios
     if all(col in df.columns for col in ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]):
         df = compute_ratios(df)
 
-        # Ratios Table
         st.subheader("📋 Financial Ratios")
         st.dataframe(df[["Fiscal Year", "Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]])
 
-        # Commentary
         st.subheader("💬 Gemini Commentary")
         with st.spinner("Generating insights..."):
             st.markdown(ai_commentary(df, industry))
