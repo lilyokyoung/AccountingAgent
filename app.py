@@ -9,8 +9,8 @@ from fpdf import FPDF
 # 🔐 OpenRouter API Key from secrets
 OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
 
-# 🧠 Unified LLM Caller via OpenRouter
-def openrouter_call(prompt, model="deepseek/deepseek-coder:free", max_tokens=1024):
+# 🧠 Unified LLM Caller via OpenRouter (DeepSeek Chat)
+def openrouter_call(prompt, model="deepseek-chat", max_tokens=1024):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
