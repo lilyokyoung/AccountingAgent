@@ -1,50 +1,37 @@
 import pandas as pd
 
 def extract_clean_balance_sheet(df):
-    # Standardize column names and string types
-    df.columns = [str(col) for col in df.columns]
-    df = df.astype(str)
+    # Safely convert all cells to lowercase strings
+    df = df.fillna("").astype(str).apply(lambda x: x.str.strip().str.lower(), axis=1)
 
-    # Store extracted values
-    balance_data = {
-        "Short-Term Liabilities": 0.0,
-        "Long-Term Liabilities": 0.0,
-        "Owner's Investment": 0.0,
-        "Retained Earnings": 0.0
+    # Define label match patterns
+    keywords = {
+        "Short-Term Liabilities": ["short term liabilities", "short-term liabilities", "current liabilities"],
+        "Long-Term Liabilities": ["long term liabilities", "long-term liabilities", "non current liabilities"],
+        "Owner's Investment": ["owner investment", "owner's investment", "capital contributed"],
+        "Retained Earnings": ["retained earnings", "accumulated earnings", "reserves"]
     }
 
-    # Extract values based on row text
+    values = {k: 0.0 for k in keywords}
+
+    # Search for matches
     for _, row in df.iterrows():
-        row_str = " ".join(row).lower()
-        # Match and extract numbers
-        if "short-term liabilities" in row_str:
-            try:
-                balance_data["Short-Term Liabilities"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
-            except:
-                pass
-        elif "total long-term liabilities" in row_str:
-            try:
-                balance_data["Long-Term Liabilities"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
-            except:
-                pass
-        elif "owner's investment" in row_str:
-            try:
-                balance_data["Owner's Investment"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
-            except:
-                pass
-        elif "retained earnings" in row_str:
-            try:
-                balance_data["Retained Earnings"] = float([x for x in row if x.replace('.', '', 1).isdigit()][0])
-            except:
-                pass
+        row_text = " ".join(row)
+        for label, patterns in keywords.items():
+            for pattern in patterns:
+                if pattern in row_text:
+                    try:
+                        numeric_values = [x for x in row if x.replace(",", "").replace(".", "", 1).isdigit()]
+                        if numeric_values:
+                            values[label] = float(numeric_values[0].replace(",", ""))
+                    except Exception as e:
+                        print(f"Error parsing {label}: {e}")
 
-    # Compute totals
-    total_liabilities = balance_data["Short-Term Liabilities"] + balance_data["Long-Term Liabilities"]
-    total_equity = balance_data["Owner's Investment"] + balance_data["Retained Earnings"]
-    total_liabilities_equity = total_liabilities + total_equity
+    # Totals
+    total_equity = values["Owner's Investment"] + values["Retained Earnings"]
+    total_liab_eq = values["Short-Term Liabilities"] + values["Long-Term Liabilities"] + total_equity
 
-    # Return a cleaned summary table
-    clean_df = pd.DataFrame({
+    return pd.DataFrame({
         "Category": [
             "Short-Term Liabilities",
             "Long-Term Liabilities",
@@ -54,13 +41,11 @@ def extract_clean_balance_sheet(df):
             "Total Liabilities & Equity"
         ],
         "Amount": [
-            balance_data["Short-Term Liabilities"],
-            balance_data["Long-Term Liabilities"],
-            balance_data["Owner's Investment"],
-            balance_data["Retained Earnings"],
+            values["Short-Term Liabilities"],
+            values["Long-Term Liabilities"],
+            values["Owner's Investment"],
+            values["Retained Earnings"],
             total_equity,
-            total_liabilities_equity
+            total_liab_eq
         ]
     })
-
-    return clean_df
