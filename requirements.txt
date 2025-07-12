@@ -4,3 +4,4 @@ openpyxl
 google-generativeai
 plotly
 fpdf
+XlsxWriter
