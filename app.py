@@ -1,98 +1,101 @@
 import streamlit as st
 import pandas as pd
-import os
 import re
-from difflib import get_close_matches
 
-st.set_page_config(page_title="📊 Financial Statement Analyzer", layout="wide")
-st.title("📊 Cleaned Balance Sheet Summary")
-
-# --- Helper Functions ---
+# ---------------- Utility Functions ---------------- #
 
 def normalize(text):
-    return re.sub(r'[^a-z0-9]', '', str(text).lower().strip())
+    return ''.join(e for e in str(text).lower().strip() if e.isalnum())
 
-def match_column(possible_names, df_columns):
-    norm_cols = {normalize(col): col for col in df_columns}
-    for name in possible_names:
-        norm_name = normalize(name)
-        close = get_close_matches(norm_name, norm_cols.keys(), n=1, cutoff=0.7)
-        if close:
-            return norm_cols[close[0]]
-    return None
+def match_columns(df, target_map):
+    found = {}
+    normalized_columns = {normalize(col): col for col in df.columns}
 
-def extract_clean_balance_sheet(df):
-    if df.columns[0] != 'Year':
-        df.columns = df.iloc[0]
-        df = df.drop(index=0).reset_index(drop=True)
+    for target, options in target_map.items():
+        found[target] = None
+        for opt in options:
+            norm_opt = normalize(opt)
+            for norm_col, original_col in normalized_columns.items():
+                if norm_opt in norm_col:
+                    found[target] = original_col
+                    break
+            if found[target]:
+                break
+    return found
 
-    latest = df.iloc[-1]
-    columns = df.columns
+def extract_clean_balance_sheet(df, col_map):
+    cleaned = []
+    for label in col_map:
+        col = col_map[label]
+        if col and col in df.columns:
+            try:
+                amount = pd.to_numeric(df[col], errors='coerce').fillna(0).sum()
+                cleaned.append((label, amount))
+            except:
+                cleaned.append((label, 0))
+        else:
+            cleaned.append((label, 0))
+    return pd.DataFrame(cleaned, columns=["Category", "Amount"])
 
-    short_liab_col = match_column(["short term liabilities", "current liabilities", "total current liabilities"], columns)
-    long_liab_col = match_column(["long term liabilities", "non current liabilities", "total non-current liabilities"], columns)
-    equity_col = match_column(["total equity", "owner's equity", "shareholders funds", "net worth"], columns)
-    retained_col = match_column(["retained earnings", "retained profits", "accumulated profits"], columns)
+# ---------------- Streamlit App ---------------- #
 
-    # Show warnings for unmatched
-    for label, col in {
-        "Short-Term Liabilities": short_liab_col,
-        "Long-Term Liabilities": long_liab_col,
-        "Owner's Equity": equity_col,
-        "Retained Earnings": retained_col
-    }.items():
-        if col is None:
-            st.warning(f"❌ No match found for **{label}**")
+st.set_page_config(page_title="📊 Accounting Agent", layout="wide")
 
-    def get_val(col):
-        try:
-            return float(str(latest[col]).replace(",", "")) if col else 0.0
-        except:
-            return 0.0
+st.title("📁 Upload Balance Sheet")
+uploaded_file = st.file_uploader("Upload Excel or CSV file", type=["csv", "xlsx"])
 
-    short_term_liab = get_val(short_liab_col)
-    long_term_liab = get_val(long_liab_col)
-    equity = get_val(equity_col)
-    retained = get_val(retained_col)
-
-    investment = equity - retained if equity and retained else equity
-    total_equity = investment + retained
-    total_liab_equity = short_term_liab + long_term_liab + total_equity
-
-    return pd.DataFrame({
-        "Category": [
-            "Short-Term Liabilities",
-            "Long-Term Liabilities",
-            "Owner's Investment",
-            "Retained Earnings",
-            "Total Owner's Equity",
-            "Total Liabilities & Equity"
-        ],
-        "Amount": [
-            short_term_liab,
-            long_term_liab,
-            investment,
-            retained,
-            total_equity,
-            total_liab_equity
-        ]
-    })
-
-# --- File Upload ---
-uploaded_file = st.file_uploader("📤 Upload Balance Sheet Excel File", type=["xlsx", "xls", "csv"])
 if uploaded_file:
-    company_name = os.path.splitext(uploaded_file.name)[0]
-    st.markdown(f"🏢 **Detected Company:** `{company_name}`")
+    filename = uploaded_file.name
+    st.markdown(f"🏢 **Detected Company:** `{filename.replace('.xlsx','').replace('.csv','')}`")
 
-    try:
-        df = pd.read_excel(uploaded_file)
-    except:
+    if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-    summary_df = extract_clean_balance_sheet(df)
+    # Display raw data
+    with st.expander("🧾 View Raw Data"):
+        st.dataframe(df)
 
-    st.subheader("📊 Cleaned Balance Sheet Summary")
+    # Fuzzy match map
+    concept_map = {
+        "Short-Term Liabilities": ["short term liabilities", "current liabilities", "short term borrowings"],
+        "Long-Term Liabilities": ["long term liabilities", "non current liabilities", "non-current liabilities"],
+        "Owner's Equity": ["owner's equity", "total equity", "share capital", "net worth"],
+        "Retained Earnings": ["retained earnings", "accumulated profits", "retained profits", "accumulated earnings"],
+    }
+
+    # Perform column matching
+    matches = match_columns(df, concept_map)
+
+    for k, v in matches.items():
+        if v:
+            st.success(f"✅ Matched **{k}** to column: `{v}`")
+        else:
+            st.error(f"❌ No match found for **{k}**")
+
+    # Build cleaned summary
+    summary_df = extract_clean_balance_sheet(df, matches)
+    st.markdown("### 📊 Cleaned Balance Sheet Summary")
     st.dataframe(summary_df)
 
-    if summary_df["Amount"].sum() == 0:
-        st.warning("⚠️ All values extracted are zero. Please check your file format and column labels.")
+    # Ratio calculation
+    st.markdown("### 📉 Key Ratios")
+    try:
+        st.write("**Debt-to-Equity Ratio**")
+        st.metric("Ratio", round(
+            (summary_df.loc[summary_df['Category'] == 'Short-Term Liabilities', 'Amount'].values[0] +
+             summary_df.loc[summary_df['Category'] == 'Long-Term Liabilities', 'Amount'].values[0]) /
+            summary_df.loc[summary_df['Category'] == "Owner's Equity", 'Amount'].values[0], 2)
+        )
+    except:
+        st.warning("⚠️ Unable to compute Debt-to-Equity Ratio due to missing or zero values.")
+
+    try:
+        st.write("**Equity Ratio**")
+        st.metric("Ratio", round(
+            summary_df.loc[summary_df['Category'] == "Owner's Equity", 'Amount'].values[0] /
+            summary_df['Amount'].sum(), 2)
+        )
+    except:
+        st.warning("⚠️ Unable to compute Equity Ratio due to missing or zero values.")
