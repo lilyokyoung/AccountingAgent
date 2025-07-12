@@ -125,26 +125,18 @@ if uploaded_file:
     col_map = {}
     for key, expected in expected_fields.items():
         match = fuzzy_match(expected, df.columns)
-        col_map[key] = match
+        if match:
+            df = df.rename(columns={match: key})
+            col_map[key] = key
 
-    with st.expander("🛠 Manually confirm or correct column mapping"):
-        for key in col_map:
-            current_val = col_map[key] if col_map[key] in df.columns else None
-            col_map[key] = st.selectbox(
-                f"{key}",
-                [None] + list(df.columns),
-                index=([None] + list(df.columns)).index(current_val) if current_val else 0
-            )
-
-    missing_cols = [key for key in expected_fields if not col_map[key]]
+    missing_cols = [k for k in ["Current Assets", "Net Profit", "Revenue"] if k not in df.columns]
     if missing_cols:
         st.warning(f"⚠️ Missing columns for full analysis: {', '.join(missing_cols)}")
 
     essential_cols = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
-    if not all(col_map[c] for c in essential_cols):
-        st.error("❌ Missing essential columns: STL, LTL, or Equity.")
+    if not all(col in df.columns for col in essential_cols):
+        st.error("❌ Essential columns missing: STL, LTL, or Equity.")
     else:
-        df = df.rename(columns={v: k for k, v in col_map.items() if v})
         df = compute_ratios(df)
 
         st.subheader("📋 Ratio Table (All Years)")
