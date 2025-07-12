@@ -1,3 +1,5 @@
+import pandas as pd
+
 def extract_clean_balance_sheet(df):
     df.columns = df.iloc[0]
     df = df.drop(0).reset_index(drop=True)
