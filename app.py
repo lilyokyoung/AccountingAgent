@@ -1,154 +1,124 @@
-import pandas as pd
 import streamlit as st
-import plotly.express as px
+import pandas as pd
 import os
 
-# ---------- 🏢 Detect company from filename ----------
+# ----------------------------
+# Helper Functions
+# ----------------------------
 
-def extract_company_name_from_filename(uploaded_file):
-    filename = uploaded_file.name.lower()
-    company_keywords = ["fonterra", "airnz", "anz", "asb", "fisher", "zenergy", "mainfreight", "kiwibank"]
-    for keyword in company_keywords:
-        if keyword in filename:
-            return keyword.capitalize()
-    return "Unknown"
+def detect_company_and_industry(filename):
+    name = os.path.basename(filename).lower()
+    if "fonterra" in name:
+        return "Fonterra", "Dairy"
+    elif "airnz" in name or "air new zealand" in name:
+        return "Air New Zealand", "Airlines"
+    elif "fisher" in name and "paykel" in name:
+        return "Fisher & Paykel", "Healthcare"
+    else:
+        return "Unknown", "Unknown"
 
-def map_company_to_industry(company_name):
-    company_industry_map = {
-        "Fonterra": "Dairy",
-        "Airnz": "Aviation",
-        "Anz": "Banking",
-        "Asb": "Banking",
-        "Zenergy": "Energy",
-        "Fisher": "Healthcare",
-        "Mainfreight": "Logistics",
-        "Kiwibank": "Banking"
+def parse_balance_sheet(df):
+    df.columns = df.iloc[0]
+    df = df.drop(0).reset_index(drop=True)
+
+    latest = df.iloc[0]
+
+    def get_val(possible_names):
+        for col in df.columns:
+            for name in possible_names:
+                if str(col).strip().lower().startswith(name.lower()):
+                    try:
+                        return float(str(latest[col]).replace(",", ""))
+                    except:
+                        return None
+        return None
+
+    short_liab = get_val(["short-term liabilities", "short term liabilities", "current liabilities"])
+    long_liab = get_val(["long-term liabilities", "long term liabilities", "non-current liabilities"])
+    equity = get_val(["total equity", "net worth"])
+    retained = get_val(["retained earnings", "accumulated profits"])
+
+    if equity is None: equity = 0.0
+    if retained is None: retained = 0.0
+
+    investment = equity - retained
+    total_equity = investment + retained
+    total_liab_equity = (short_liab or 0) + (long_liab or 0) + total_equity
+
+    return {
+        "Short-Term Liabilities": short_liab or 0,
+        "Long-Term Liabilities": long_liab or 0,
+        "Owner's Investment": investment or 0,
+        "Retained Earnings": retained or 0,
+        "Total Owner's Equity": total_equity or 0,
+        "Total Liabilities & Equity": total_liab_equity or 0
     }
-    return company_industry_map.get(company_name, "Unknown")
 
-industry_benchmarks = {
-    "Dairy": {"Debt to Equity": 1.5, "Equity Ratio": 0.4},
-    "Banking": {"Debt to Equity": 9.0, "Equity Ratio": 0.1},
-    "Aviation": {"Debt to Equity": 3.5, "Equity Ratio": 0.25},
-    "Healthcare": {"Debt to Equity": 0.8, "Equity Ratio": 0.55},
-    "Logistics": {"Debt to Equity": 2.0, "Equity Ratio": 0.3},
-    "Energy": {"Debt to Equity": 1.8, "Equity Ratio": 0.35}
-}
+def get_industry_benchmarks(industry):
+    if industry == "Dairy":
+        return {"Debt to Equity": 1.2, "Equity Ratio": 0.45}
+    elif industry == "Airlines":
+        return {"Debt to Equity": 2.0, "Equity Ratio": 0.30}
+    elif industry == "Healthcare":
+        return {"Debt to Equity": 0.8, "Equity Ratio": 0.55}
+    else:
+        return {"Debt to Equity": None, "Equity Ratio": None}
 
-# ---------- 🧽 Clean balance sheet ----------
+def compute_ratios(balance_data):
+    debt = balance_data["Short-Term Liabilities"] + balance_data["Long-Term Liabilities"]
+    equity = balance_data["Total Owner's Equity"]
+    debt_to_equity = debt / equity if equity else None
+    equity_ratio = equity / balance_data["Total Liabilities & Equity"] if balance_data["Total Liabilities & Equity"] else None
+    return {"Debt to Equity": debt_to_equity, "Equity Ratio": equity_ratio}
 
-def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = df.columns.astype(str).str.strip().str.lower()
-    if "fiscal year" not in df.columns:
-        raise ValueError("Missing 'Fiscal Year' column.")
+# ----------------------------
+# Streamlit UI
+# ----------------------------
 
-    def safe_float(x):
-        try:
-            return float(str(x).replace(",", "").strip())
-        except:
-            return 0.0
+st.set_page_config(page_title="📊 Balance Sheet Analyzer", layout="wide")
+st.title("📄 Balance Sheet Analyzer with Industry Benchmarking")
 
-    cleaned = pd.DataFrame()
-    cleaned["Fiscal Year"] = df["fiscal year"]
-
-    def match_column(possible_names):
-        for name in possible_names:
-            for col in df.columns:
-                if name in col:
-                    return df[col].apply(safe_float)
-        return pd.Series([0.0] * len(df))
-
-    cleaned["Short-Term Liabilities"] = match_column(["current liabilities", "short-term liabilities"])
-    cleaned["Long-Term Liabilities"] = match_column(["non-current liabilities", "long-term liabilities"])
-    cleaned["Retained Earnings"] = match_column(["retained earnings", "accumulated"])
-    cleaned["Total Owner's Equity"] = match_column(["total equity", "net worth"])
-    cleaned["Owner's Investment"] = cleaned["Total Owner's Equity"] - cleaned["Retained Earnings"]
-    cleaned["Total Liabilities & Equity"] = (
-        cleaned["Short-Term Liabilities"] + cleaned["Long-Term Liabilities"] + cleaned["Total Owner's Equity"]
-    )
-
-    return cleaned
-
-# ---------- 🚀 Streamlit App ----------
-
-st.set_page_config(page_title="📊 Industry Ratio Analyzer", layout="wide")
-st.title("📁 Financial Statement Analyzer with Industry Benchmarking")
-
-uploaded_file = st.file_uploader("Upload your Balance Sheet (Excel/CSV)", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload a Balance Sheet Excel or CSV", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
+    filename = uploaded_file.name
     try:
-        file_ext = os.path.splitext(uploaded_file.name)[-1]
-        df = pd.read_excel(uploaded_file) if file_ext == ".xlsx" else pd.read_csv(uploaded_file)
-
-        st.markdown("### 🧾 Raw Data Preview")
-        st.dataframe(df.head())
-
-        # 🏢 Detect company & industry
-        company_name = extract_company_name_from_filename(uploaded_file)
-        industry = map_company_to_industry(company_name)
-
-        # 🔁 Fallback
-        if company_name == "Unknown":
-            company_name = st.text_input("🏢 Enter Company Name:")
-        if industry == "Unknown":
-            industry = st.selectbox("🏷️ Select Industry:", list(industry_benchmarks.keys()))
-
-        st.markdown(f"**🏢 Company:** `{company_name}`")
-        st.markdown(f"**🏷️ Industry:** `{industry}`")
-
-        # 🧼 Clean balance sheet
-        summary_df = extract_balance_sheet_summary(df)
-        st.markdown("### 📊 Cleaned Balance Sheet Summary")
-        st.dataframe(summary_df)
-
-        for col in summary_df.columns.drop("Fiscal Year"):
-            fig = px.line(summary_df, x="Fiscal Year", y=col, markers=True, title=f"{col} Over Time")
-            st.plotly_chart(fig, use_container_width=True)
-
-        # 📌 Financial Ratios
-        st.markdown("### 📈 Financial Ratios Over Time")
-        ratios = []
-        for _, row in summary_df.iterrows():
-            total_liab = row["Short-Term Liabilities"] + row["Long-Term Liabilities"]
-            equity = row["Total Owner's Equity"]
-            year = row["Fiscal Year"]
-
-            # Handle division by zero or missing data
-            debt_equity = round(total_liab / equity, 2) if equity and equity != 0 else float("nan")
-            equity_ratio = round(equity / (total_liab + equity), 2) if (total_liab + equity) != 0 else float("nan")
-
-            ratios.append({
-                "Fiscal Year": year,
-                "Debt to Equity": debt_equity,
-                "Equity Ratio": equity_ratio
-            })
-
-        ratio_df = pd.DataFrame(ratios)
-        st.dataframe(ratio_df)
-
-        fig1 = px.line(ratio_df, x="Fiscal Year", y="Debt to Equity", markers=True, title="Debt to Equity Over Time")
-        fig2 = px.line(ratio_df, x="Fiscal Year", y="Equity Ratio", markers=True, title="Equity Ratio Over Time")
-        st.plotly_chart(fig1, use_container_width=True)
-        st.plotly_chart(fig2, use_container_width=True)
-
-        # 🔍 Debug: Show last year values
-        st.markdown("### 🔍 Last Year Input Values")
-        st.write(summary_df.iloc[-1])
-
-        # 🧮 Industry Comparison
-        if industry in industry_benchmarks:
-            st.markdown(f"### 🧮 Industry Benchmark Comparison for `{industry}`")
-            bench = industry_benchmarks[industry]
-            latest = ratio_df.iloc[-1]
-            for metric in ["Debt to Equity", "Equity Ratio"]:
-                val = latest[metric]
-                delta = round(val - bench[metric], 2) if pd.notna(val) else "N/A"
-                st.metric(label=metric, value=val, delta=delta)
+        if filename.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
         else:
-            st.warning("⚠️ No benchmarks for this industry.")
+            df = pd.read_excel(uploaded_file)
+
+        st.subheader("📊 Raw Preview of Uploaded File")
+        st.dataframe(df)
+
+        # Identify company
+        company_name, industry = detect_company_and_industry(filename)
+        st.markdown(f"🏢 **Detected Company:** `{company_name}`")
+        st.markdown(f"🏷️ **Industry Classification:** `{industry}`")
+
+        # Parse balance sheet
+        balance_summary = parse_balance_sheet(df)
+        st.subheader("📘 Cleaned Balance Sheet Summary")
+        st.table(pd.DataFrame(balance_summary.items(), columns=["Category", "Amount"]))
+
+        # Compute Ratios
+        ratios = compute_ratios(balance_summary)
+        benchmarks = get_industry_benchmarks(industry)
+
+        st.subheader(f"📊 Industry Benchmark Comparison for `{industry}`")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Debt to Equity", f"{ratios['Debt to Equity']:.2f}" if ratios['Debt to Equity'] else "N/A", 
+                      help="Total Liabilities divided by Total Equity")
+            st.caption(f"📊 Industry Avg: {benchmarks['Debt to Equity'] if benchmarks['Debt to Equity'] else 'N/A'}")
+
+        with col2:
+            st.metric("Equity Ratio", f"{ratios['Equity Ratio']:.2f}" if ratios['Equity Ratio'] else "N/A",
+                      help="Total Equity divided by Total Liabilities + Equity")
+            st.caption(f"📊 Industry Avg: {benchmarks['Equity Ratio'] if benchmarks['Equity Ratio'] else 'N/A'}")
 
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        st.error(f"❌ Failed to read file: {e}")
 else:
-    st.info("📤 Upload a balance sheet file to begin.")
+    st.info("📥 Please upload a balance sheet file to begin analysis.")
