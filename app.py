@@ -83,12 +83,23 @@ def plot_ratio_comparison(firm_value, benchmark, ratio_name):
     if pd.isna(firm_value) or pd.isna(benchmark):
         return
 
+    # Vibrant color palette
+    COLORS = {
+        "green": "#2ECC40",   # bright green
+        "red": "#FF4136",     # vivid red
+        "yellow": "#FFDC00"   # bold yellow
+    }
+
+    # Color logic
     if abs(firm_value - benchmark) <= 0.05 * benchmark:
-        firm_color = "gold"
+        firm_color = COLORS["yellow"]
+        benchmark_color = COLORS["yellow"]
     elif firm_value > benchmark:
-        firm_color = "green"
+        firm_color = COLORS["green"]
+        benchmark_color = COLORS["red"]
     else:
-        firm_color = "red"
+        firm_color = COLORS["red"]
+        benchmark_color = COLORS["green"]
 
     df_plot = pd.DataFrame({
         "Label": [f"{ratio_name}"],
@@ -104,11 +115,12 @@ def plot_ratio_comparison(firm_value, benchmark, ratio_name):
         color="Source",
         color_discrete_map={
             "Your Firm": firm_color,
-            "Industry Benchmark": "gray"
+            "Industry Benchmark": benchmark_color
         },
         text_auto=True,
         title=f"{ratio_name} vs Industry Benchmark"
     )
+    fig.update_layout(showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
 # 📂 Upload
@@ -152,7 +164,6 @@ if uploaded_file:
         st.subheader("📋 Ratio Table (All Years)")
         st.dataframe(df[["Fiscal Year", "Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]])
 
-        # ✅ Unified Trend Chart
         st.subheader("📈 All Ratio Trends Over Time")
         ratio_cols = ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]
         available = [r for r in ratio_cols if r in df.columns and df[r].notna().any()]
@@ -164,7 +175,6 @@ if uploaded_file:
         else:
             st.info("No ratios available to plot.")
 
-        # 🧮 Industry comparison with color-coded bars
         if industry in INDUSTRY_BENCHMARKS:
             st.subheader(f"🧮 Benchmark Comparison – {industry}")
             latest = df.iloc[-1]
