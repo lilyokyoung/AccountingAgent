@@ -1,17 +1,39 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import google.generativeai as genai
 import difflib
 import io
+import requests
 from fpdf import FPDF
 
-# 🔐 API setup
-genai.configure(api_key=st.secrets["gemini"]["api_key"])
+# 🔐 API key setup for OpenRouter (DeepSeek)
+OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
+
+def openrouter_call(prompt, model="deepseek/deepseek-coder:free", max_tokens=1024):
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost",  # change if deploying
+        "X-Title": "AI Financial Forecasting"
+    }
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": max_tokens,
+        "temperature": 0.7
+    }
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        return response.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        return f"❌ OpenRouter call failed: {str(e).split(':')[0]}"
+
+# 🌟 App branding
 st.set_page_config(page_title="Your AI-Powered Financial Accountant", layout="wide")
 st.title("🧠 Your AI-Powered Financial Accountant")
 
-# 🎯 Branding
 st.markdown("""
 <style>
 @keyframes pulse {
@@ -33,13 +55,11 @@ st.markdown("""
 Your AI-Powered Financial Accountant doesn’t just crunch numbers – it thinks like a CFO. Upload your data and unlock professional-grade insights.
 """, unsafe_allow_html=True)
 
-# 📊 Industry benchmarks
 INDUSTRY_BENCHMARKS = {
     "Dairy": {"Debt-to-Equity Ratio": 1.2, "Equity Ratio": 0.45, "Current Ratio": 1.8, "ROE": 0.12, "Net Profit Margin": 0.08},
     "Tech": {"Debt-to-Equity Ratio": 0.5, "Equity Ratio": 0.7, "Current Ratio": 2.5, "ROE": 0.15, "Net Profit Margin": 0.2}
 }
 
-# 🧠 Helper functions
 def fuzzy_match(target, columns):
     match = difflib.get_close_matches(target, columns, n=1, cutoff=0.6)
     return match[0] if match else None
@@ -62,26 +82,23 @@ def detect_industry(name):
     return "Unknown"
 
 def ai_commentary(df, industry):
-    try:
-        latest = df.iloc[-1]
-        prompt = f"""You are a financial analyst. The company is in the {industry} industry.
+    latest = df.iloc[-1]
+    prompt = f"""You are a financial analyst. The company is in the {industry} industry.
 Here are the latest financial ratios:
 Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')},
 Equity Ratio: {latest.get('Equity Ratio')},
 Current Ratio: {latest.get('Current Ratio')},
 ROE: {latest.get('ROE')},
 Net Profit Margin: {latest.get('Net Profit Margin')}
-Compare these to industry averages and give short, practical advice."""
-        return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text.strip()
-    except Exception as e:
-        return f"❌ Gemini commentary failed: {str(e).split(':')[0]}"
+Compare with industry averages and give recommendations."""
+    return openrouter_call(prompt)
 
 def ai_forecast(df, industry):
     prompt = f"""You are a financial forecasting expert.
 Forecast the next 5 years for:
 Owner's Equity, Short-Term Liabilities, Long-Term Liabilities, Current Assets, Revenue, Net Profit.
-Based on past data:\n{df.tail(5).to_string(index=False)}\nReturn only a clean table with rows and columns."""
-    return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text.strip()
+Based on past data:\n{df.tail(5).to_string(index=False)}\nReturn a clean table."""
+    return openrouter_call(prompt)
 
 def parse_forecast_table(text_response):
     try:
@@ -129,7 +146,7 @@ def create_pdf_report(df, name):
     output.seek(0)
     return output
 
-# 📤 Upload
+# Upload
 uploaded_file = st.file_uploader("📂 Upload Excel or CSV File", type=["xlsx", "csv"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
@@ -144,30 +161,28 @@ if uploaded_file:
     company_name = uploaded_file.name.replace(".xlsx", "").replace(".csv", "")
     st.markdown(f"<div class='info-box'>🏢 Detected Company: <b>{company_name}</b><br>🏷️ Industry: <b>{industry}</b></div>", unsafe_allow_html=True)
 
-    # 📑 Balance Sheet
-    st.subheader("📑 Balance Sheet")
+    # Balance Sheet + Income Statement
     balance_vars = [col for col in df.columns if "Liabilities" in col or "Equity" in col or "Assets" in col]
+    income_vars = [col for col in df.columns if col not in balance_vars and col not in ['Fiscal Year'] and df[col].dtype != 'O']
+
+    st.subheader("📑 Balance Sheet")
     st.dataframe(df[["Fiscal Year"] + balance_vars])
 
-    # 💰 Income Statement
     st.subheader("💰 Income Statement")
-    income_vars = [col for col in df.columns if col not in balance_vars and col not in ['Fiscal Year'] and df[col].dtype != 'O']
     st.dataframe(df[["Fiscal Year"] + income_vars])
 
-    # 📊 Ratio Trends
+    # Ratio Trends
     st.subheader("📈 Ratio Trends")
     ratio_cols = ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]
     st.plotly_chart(px.line(df, x="Fiscal Year", y=ratio_cols, markers=True))
 
-    # 📊 Balance Sheet Graph
     st.subheader("📊 Balance Sheet Components Over Time")
     st.plotly_chart(px.bar(df, x="Fiscal Year", y=balance_vars, barmode="group"), use_container_width=True)
 
-    # 📊 Income Statement Graph
     st.subheader("📊 Income Statement Components Over Time")
     st.plotly_chart(px.bar(df, x="Fiscal Year", y=income_vars, barmode="group"), use_container_width=True)
 
-    # 🧮 Benchmark
+    # Benchmark
     if industry in INDUSTRY_BENCHMARKS:
         st.subheader(f"🧮 Benchmark Comparison – {industry}")
         latest = df.iloc[-1]
@@ -188,26 +203,22 @@ if uploaded_file:
                              x="Source", y=ratio, color="Source", color_discrete_sequence=colors)
                 st.plotly_chart(fig, use_container_width=True)
 
-    # 💬 Gemini Commentary
-    st.subheader("💬 Gemini Commentary")
+    # Commentary
+    st.subheader("💬 DeepSeek Commentary")
     st.markdown(ai_commentary(df, industry))
 
-    # 🧠 Gemini Q&A
-    st.subheader("🧠 Ask Gemini")
+    # Q&A
+    st.subheader("🧠 Ask DeepSeek")
     user_q = st.text_input("Ask a question about this firm or its ratios:")
     if user_q:
-        try:
-            answer = genai.GenerativeModel("gemini-1.5-flash").generate_content(
-                f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}"
-            ).text.strip()
-            st.success(answer)
-        except Exception as e:
-            st.warning(f"❌ Gemini Q&A failed: {str(e).split(':')[0]}")
+        answer = openrouter_call(f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}")
+        st.success(answer)
 
-    # 🔮 Forecast
+    # Forecast
     st.subheader("🔮 Forecast (5 Years)")
     forecast_txt = ai_forecast(df, industry)
     st.code(forecast_txt)
+
     df_forecast = parse_forecast_table(forecast_txt)
     if df_forecast is not None and not df_forecast.empty:
         col1, col2 = st.columns(2)
@@ -220,7 +231,7 @@ if uploaded_file:
     else:
         st.warning("❌ Forecast could not be parsed.")
 
-    # 📥 Download Reports
+    # Downloads
     st.subheader("📥 Download Reports")
     st.download_button("⬇️ Excel Report", convert_df_to_excel(df), file_name="report.xlsx")
     st.download_button("⬇️ PDF Report", create_pdf_report(df, company_name), file_name="report.pdf")
