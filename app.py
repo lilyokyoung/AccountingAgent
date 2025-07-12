@@ -1,102 +1,90 @@
 import streamlit as st
 import pandas as pd
-import difflib
 import os
 
-# Set page config
-st.set_page_config(page_title="📊 Balance Sheet Analyzer", layout="wide")
+# 🔧 Flexible column matching
+def get_value_fuzzy(row, keywords):
+    for keyword in keywords:
+        keyword = keyword.lower().replace("-", " ").strip()
+        for col in row.index:
+            col_norm = str(col).lower().replace("-", " ").replace("_", " ").strip()
+            if keyword in col_norm:
+                try:
+                    return float(str(row[col]).replace(",", ""))
+                except:
+                    continue
+    return None
 
-st.title("🧾 Cleaned Balance Sheet Summary")
+# 🚀 Streamlit App
+st.set_page_config(page_title="Balance Sheet Analyzer", layout="wide")
+st.title("💡 Cleaned Balance Sheet Summary")
 
-def extract_clean_balance_sheet(df, debug=False):
-    if df.shape[0] < df.shape[1]:
-        df = df.transpose()
-        if debug:
-            st.warning("🔄 Transposed DataFrame due to wide format.")
-
-    df.columns = df.iloc[0]
-    df = df.drop(0).reset_index(drop=True)
-
-    latest = df.iloc[0]
-    all_columns = [str(c).strip().lower() for c in df.columns]
-
-    def match_column(possible_names):
-        for name in possible_names:
-            match = difflib.get_close_matches(name.lower(), all_columns, n=1, cutoff=0.6)
-            if match:
-                if debug:
-                    st.info(f"✅ Matched '{name}' to column '{match[0]}'")
-                return df.columns[all_columns.index(match[0])]
-            else:
-                if debug:
-                    st.error(f"❌ No match found for '{name}'")
-        return None
-
-    def safe_float(val):
-        try:
-            return float(str(val).replace(",", "").strip())
-        except:
-            return 0.0
-
-    col_short = match_column(["short term liabilities", "current liabilities"])
-    col_long = match_column(["long term liabilities", "non current liabilities"])
-    col_equity = match_column(["total equity", "net worth", "owner's equity"])
-    col_retained = match_column(["retained earnings", "accumulated profits"])
-
-    val_short = safe_float(latest.get(col_short, 0.0))
-    val_long = safe_float(latest.get(col_long, 0.0))
-    val_equity = safe_float(latest.get(col_equity, 0.0))
-    val_retained = safe_float(latest.get(col_retained, 0.0))
-
-    investment = val_equity - val_retained
-    total_equity = val_equity
-    total_liabilities_equity = val_short + val_long + total_equity
-
-    if debug:
-        st.write("📊 **Extracted Values:**")
-        st.write(f"- Short-term liabilities: {val_short}")
-        st.write(f"- Long-term liabilities: {val_long}")
-        st.write(f"- Equity: {val_equity}")
-        st.write(f"- Retained Earnings: {val_retained}")
-        st.write(f"- Owner’s Investment: {investment}")
-
-    return pd.DataFrame({
-        "Category": [
-            "Short-Term Liabilities",
-            "Long-Term Liabilities",
-            "Owner's Investment",
-            "Retained Earnings",
-            "Total Owner's Equity",
-            "Total Liabilities & Equity"
-        ],
-        "Amount": [
-            val_short,
-            val_long,
-            investment,
-            val_retained,
-            total_equity,
-            total_liabilities_equity
-        ]
-    })
-
-uploaded_file = st.file_uploader("📤 Upload Balance Sheet File (Excel or CSV)", type=["csv", "xls", "xlsx"])
+uploaded_file = st.file_uploader("📤 Upload your Balance Sheet Excel or CSV", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
-    file_name = uploaded_file.name
-    company_name = os.path.splitext(file_name)[0]
-    st.subheader(f"🏢 Detected Company: `{company_name}`")
+    company_name = os.path.splitext(uploaded_file.name)[0]
+    st.markdown(f"🏢 **Detected Company:** `{company_name}`")
 
     try:
-        if file_name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
+        if uploaded_file.name.endswith(".csv"):
+            df_raw = pd.read_csv(uploaded_file)
         else:
-            df = pd.read_excel(uploaded_file)
+            df_raw = pd.read_excel(uploaded_file)
 
-        cleaned_df = extract_clean_balance_sheet(df, debug=True)
-        st.dataframe(cleaned_df, use_container_width=True)
+        # Detect if transposition needed
+        if "Fiscal Year" in df_raw.iloc[:, 0].values:
+            df_raw.columns = df_raw.iloc[:, 0]
+            df = df_raw.iloc[:, 1:].T
+            df.columns.name = None
+            df = df.reset_index(drop=True)
+        else:
+            df = df_raw.copy()
 
-        if cleaned_df["Amount"].sum() == 0:
+        row = df.iloc[0]
+
+        short_term_liab = get_value_fuzzy(row, ["short term liabilities", "current liabilities"])
+        long_term_liab = get_value_fuzzy(row, ["long term liabilities", "non current liabilities"])
+        retained_earnings = get_value_fuzzy(row, ["retained earnings"])
+        total_equity = get_value_fuzzy(row, ["total equity", "owner's equity", "net worth"])
+        investment = get_value_fuzzy(row, ["owner's investment"])
+
+        if total_equity is not None and retained_earnings is not None:
+            investment = total_equity - retained_earnings
+        if retained_earnings is None:
+            retained_earnings = 0.0
+        if investment is None:
+            investment = 0.0
+        if total_equity is None:
+            total_equity = investment + retained_earnings
+
+        total_liab_equity = sum(filter(None, [short_term_liab, long_term_liab])) + total_equity
+
+        summary = pd.DataFrame({
+            "Category": [
+                "Short-Term Liabilities",
+                "Long-Term Liabilities",
+                "Owner's Investment",
+                "Retained Earnings",
+                "Total Owner's Equity",
+                "Total Liabilities & Equity"
+            ],
+            "Amount": [
+                short_term_liab or 0.0,
+                long_term_liab or 0.0,
+                investment or 0.0,
+                retained_earnings or 0.0,
+                total_equity or 0.0,
+                total_liab_equity or 0.0
+            ]
+        })
+
+        st.dataframe(summary)
+
+        if summary["Amount"].sum() == 0:
             st.warning("⚠️ All values extracted are zero. Please check your file format and column labels.")
 
     except Exception as e:
-        st.error(f"❌ Failed to read file: {e}")
+        st.error(f"❌ Error reading file: {e}")
+
+else:
+    st.info("📂 Please upload a balance sheet file.")
