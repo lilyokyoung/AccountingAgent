@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import difflib
 import requests
+import io
+import difflib
 import uuid
 
-# Set up page
+# App config
 st.set_page_config(page_title="🧠 Your AI-Powered Financial Accountant", layout="wide")
 st.title("🧠 Your AI-Powered Financial Accountant")
 
-# Styling header
 st.markdown("""
 <style>
 @keyframes pulse {
@@ -31,7 +31,7 @@ st.markdown("""
 Your AI-Powered Financial Accountant doesn’t just crunch numbers – it thinks like a CFO. Upload your data and unlock professional-grade insights.
 """, unsafe_allow_html=True)
 
-# OpenRouter API Key
+# Config
 OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
 
 # Benchmarks
@@ -61,28 +61,63 @@ def detect_industry(name):
         return "Tech"
     return "Unknown"
 
-def deepseek_ai(prompt):
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "deepseek/deepseek-r1:free",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+def ai_commentary_deepseek(df, industry):
+    latest = df.iloc[-1]
+    prompt = f"""You are a financial analyst. The company is in the {industry} industry.
+Here are the latest ratios:
+- Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')}
+- Equity Ratio: {latest.get('Equity Ratio')}
+- Current Ratio: {latest.get('Current Ratio')}
+- ROE: {latest.get('ROE')}
+- Net Profit Margin: {latest.get('Net Profit Margin')}
+Compare with industry benchmarks and give insights and recommendations."""
+    
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": "deepseek/deepseek-r1:free", "messages": [{"role": "user", "content": prompt}]}
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ DeepSeek error: {e}"
+
+def ai_forecast_deepseek(df):
+    prompt = f"""You are a finance expert. Based on this company's past data:\n{df.tail(5).to_string(index=False)}\n
+Forecast next 5 years for:
+Owner's Equity, Short-Term Liabilities, Long-Term Liabilities, Current Assets, Revenue, Net Profit.
+Return forecast as a clean table with years as rows."""
+    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": "deepseek/deepseek-r1:free", "messages": [{"role": "user", "content": prompt}]}
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"❌ Forecast error: {e}"
+
+def parse_forecast_table(text):
+    try:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        header = lines[0].split()
+        data = [line.split() for line in lines[1:] if len(line.split()) == len(header)]
+        if not data: return None
+        df = pd.DataFrame(data, columns=header)
+        for col in df.columns[1:]:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df
+    except:
+        return None
 
 # Upload
 uploaded_file = st.file_uploader("📂 Upload Excel or CSV File", type=["xlsx", "csv"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
     df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
+
+    # Clean columns
     for field in ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets", "Revenue", "Net Profit"]:
         match = fuzzy_match(field, df.columns)
         if match:
             df.rename(columns={match: field}, inplace=True)
+
     df = compute_ratios(df)
 
     industry = detect_industry(uploaded_file.name)
@@ -90,7 +125,7 @@ if uploaded_file:
     st.markdown(f"<div class='info-box'>🏢 Detected Company: <b>{company_name}</b><br>🏷️ Industry: <b>{industry}</b></div>", unsafe_allow_html=True)
 
     st.subheader("📑 Balance Sheet")
-    st.dataframe(df[["Fiscal Year", "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"]])
+    st.dataframe(df[["Fiscal Year", "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]])
 
     st.subheader("💰 Income Statement")
     st.dataframe(df[["Fiscal Year", "Revenue", "Net Profit"]])
@@ -99,10 +134,12 @@ if uploaded_file:
     st.plotly_chart(px.line(df, x="Fiscal Year", y=["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"], markers=True))
 
     st.subheader("📊 Balance Sheet Components Over Time")
-    st.plotly_chart(px.bar(df, x="Fiscal Year", y=["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"], barmode="group"))
+    fig1 = px.bar(df, x="Fiscal Year", y=["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"], barmode="group")
+    st.plotly_chart(fig1, use_container_width=True)
 
     st.subheader("📊 Income Statement Components Over Time")
-    st.plotly_chart(px.bar(df, x="Fiscal Year", y=["Revenue", "Net Profit"], barmode="group"))
+    fig2 = px.bar(df, x="Fiscal Year", y=["Revenue", "Net Profit"], barmode="group")
+    st.plotly_chart(fig2, use_container_width=True)
 
     if industry in INDUSTRY_BENCHMARKS:
         st.subheader(f"🧮 Benchmark Comparison – {industry}")
@@ -110,62 +147,46 @@ if uploaded_file:
         for ratio, benchmark in INDUSTRY_BENCHMARKS[industry].items():
             val = latest.get(ratio)
             if pd.notna(val):
-                if abs(val - benchmark) <= 0.05 * benchmark:
-                    color, tag = "gold", "🟡 On Par"
-                elif val > benchmark:
-                    color, tag = "green", "🟢 Your firm is performing better"
+                if val > benchmark:
+                    firm_color, ind_color = "green", "red"
+                    tag = "🟢 Your firm is performing better"
+                elif val < benchmark:
+                    firm_color, ind_color = "red", "green"
+                    tag = "🔴 Industry is performing better"
                 else:
-                    color, tag = "red", "🔴 Industry is performing better"
+                    firm_color = ind_color = "gold"
+                    tag = "🟡 On Par"
                 st.markdown(f"**{ratio}**: {val:.2f} vs {benchmark:.2f} → {tag}")
                 fig = px.bar(pd.DataFrame({"Source": ["Your Firm", "Industry"], ratio: [val, benchmark]}),
                              x="Source", y=ratio, color="Source",
-                             color_discrete_map={"Your Firm": color, "Industry": "gray"})
+                             color_discrete_map={"Your Firm": firm_color, "Industry": ind_color})
                 st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("💬 DeepSeek Commentary")
-    try:
-        prompt = f"""You are a financial analyst. The company is in the {industry} industry.
-Here are the latest ratios:
-- Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')}
-- Equity Ratio: {latest.get('Equity Ratio')}
-- Current Ratio: {latest.get('Current Ratio')}
-- ROE: {latest.get('ROE')}
-- Net Profit Margin: {latest.get('Net Profit Margin')}
-Compare with industry averages and give detailed advice."""
-        response = deepseek_ai(prompt)
-        st.success(response)
-    except Exception as e:
-        st.error(f"❌ DeepSeek commentary failed: {e}")
+    with st.spinner("Generating commentary..."):
+        st.markdown(ai_commentary_deepseek(df, industry))
 
     st.subheader("🧠 Ask DeepSeek")
     user_q = st.text_input("Ask a question about this firm or its ratios:")
     if user_q:
-        try:
-            q_response = deepseek_ai(f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}")
-            st.info(q_response)
-        except Exception as e:
-            st.error(f"❌ DeepSeek Q&A failed: {e}")
+        response = ai_commentary_deepseek(df, f"User Question: {user_q}\nData:\n{df.tail(5).to_string(index=False)}")
+        st.success(response)
 
     st.subheader("🔮 Forecast (5 Years)")
-    try:
-        forecast_prompt = f"""Forecast the next 5 years for:
-Owner's Equity, Short-Term Liabilities, Long-Term Liabilities, Current Assets, Revenue, Net Profit.
-Based on past data:\n{df.tail(5).to_string(index=False)}\nReturn in a table format."""
-        forecast_response = deepseek_ai(forecast_prompt)
-        st.code(forecast_response)
-    except Exception as e:
-        st.error(f"❌ Forecast generation failed: {e}")
+    with st.spinner("Generating forecast..."):
+        forecast_txt = ai_forecast_deepseek(df)
+        st.code(forecast_txt)
+        df_forecast = parse_forecast_table(forecast_txt)
+        if df_forecast is not None:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.plotly_chart(px.line(df_forecast, x=df_forecast.columns[0], y=df_forecast.columns[1:], markers=True), use_container_width=True)
+            with col2:
+                st.dataframe(df_forecast)
 
+    # Botpress Q&A assistant
     st.subheader("🤖 Ask Your Financial Assistant (Botpress)")
     user_id = str(uuid.uuid4())
     config_url = "https://files.bpcontent.cloud/2025/07/02/02/20250702020605-VDMFG1YB.json"
     iframe_url = f"https://cdn.botpress.cloud/webchat/v3.0/shareable.html?configUrl={config_url}&userId={user_id}"
-    st.markdown(f"""
-        <iframe
-            src="{iframe_url}"
-            width="100%"
-            height="600"
-            style="border: none; margin-top: 20px;"
-            allow="microphone">
-        </iframe>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<iframe src="{iframe_url}" width="100%" height="600" style="border:none;" allow="microphone"></iframe>""", unsafe_allow_html=True)
