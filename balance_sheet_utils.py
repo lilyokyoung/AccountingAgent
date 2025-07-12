@@ -1,33 +1,32 @@
 import pandas as pd
 
 def extract_clean_balance_sheet(df):
-    # Clean and normalize the data
-    df = df.fillna("").astype(str).apply(lambda x: x.str.strip().str.lower(), axis=1)
+    # Assume first row contains headers
+    df.columns = df.iloc[0]
+    df = df.drop(0).reset_index(drop=True)
 
-    # Define label match patterns
-    keywords = {
-        "Short-Term Liabilities": ["current liabilities", "trade and other payables"],
-        "Long-Term Liabilities": ["non-current liabilities", "borrowings", "long-term debt"],
-        "Owner's Investment": ["share capital", "equity contributed", "owner's investment"],
-        "Retained Earnings": ["retained earnings", "accumulated profits", "reserves"]
-    }
+    # Use the most recent year (row 0)
+    latest = df.iloc[0]
 
-    values = {k: 0.0 for k in keywords}
-
-    for _, row in df.iterrows():
-        row_text = " ".join(row)
-        for label, patterns in keywords.items():
-            for pattern in patterns:
-                if pattern in row_text:
+    def get_float(colname_options):
+        for col in colname_options:
+            for actual_col in df.columns:
+                if str(actual_col).lower().strip().startswith(col.lower()):
                     try:
-                        numeric_values = [x for x in row if x.replace(",", "").replace(".", "", 1).isdigit()]
-                        if numeric_values:
-                            values[label] = float(numeric_values[0].replace(",", ""))
-                    except Exception as e:
-                        print(f"Error parsing {label}: {e}")
+                        return float(str(latest[actual_col]).replace(",", ""))
+                    except:
+                        continue
+        return 0.0
 
-    total_equity = values["Owner's Investment"] + values["Retained Earnings"]
-    total_liab_eq = values["Short-Term Liabilities"] + values["Long-Term Liabilities"] + total_equity
+    # Match relevant fields
+    short_term_liab = get_float(["short-term liabilities", "short term liabilities", "current liabilities"])
+    long_term_liab = get_float(["long-term liabilities", "long term liabilities", "non-current liabilities"])
+    equity = get_float(["total equity", "net worth"])
+    retained = get_float(["retained earnings", "accumulated profits"])
+    investment = equity - retained if retained else 0.0
+
+    total_equity = investment + retained
+    total_liabilities_and_equity = short_term_liab + long_term_liab + total_equity
 
     return pd.DataFrame({
         "Category": [
@@ -39,11 +38,11 @@ def extract_clean_balance_sheet(df):
             "Total Liabilities & Equity"
         ],
         "Amount": [
-            values["Short-Term Liabilities"],
-            values["Long-Term Liabilities"],
-            values["Owner's Investment"],
-            values["Retained Earnings"],
+            short_term_liab,
+            long_term_liab,
+            investment,
+            retained,
             total_equity,
-            total_liab_eq
+            total_liabilities_and_equity
         ]
     })
