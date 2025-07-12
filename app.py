@@ -36,6 +36,14 @@ def detect_industry(file_name):
     return "Unknown"
 
 def compute_ratios(df):
+    numeric_cols = [
+        "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity",
+        "Current Assets", "Net Profit", "Revenue"
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     df["Total Liabilities"] = df["Short-Term Liabilities"] + df["Long-Term Liabilities"]
     df["Debt-to-Equity Ratio"] = df["Total Liabilities"] / df["Owner's Equity"]
     df["Equity Ratio"] = df["Owner's Equity"] / (df["Total Liabilities"] + df["Owner's Equity"])
