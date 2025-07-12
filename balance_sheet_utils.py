@@ -1,3 +1,4 @@
+# ✅ balance_sheet_utils.py
 import pandas as pd
 
 def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
