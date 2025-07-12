@@ -1,11 +1,6 @@
-import pandas as pd
-
 def extract_clean_balance_sheet(df):
-    # Assume first row contains headers
     df.columns = df.iloc[0]
     df = df.drop(0).reset_index(drop=True)
-
-    # Use the most recent year (row 0)
     latest = df.iloc[0]
 
     def get_float(colname_options):
@@ -16,17 +11,26 @@ def extract_clean_balance_sheet(df):
                         return float(str(latest[actual_col]).replace(",", ""))
                     except:
                         continue
-        return 0.0
+        return None  # important for conditional logic below
 
-    # Match relevant fields
     short_term_liab = get_float(["short-term liabilities", "short term liabilities", "current liabilities"])
     long_term_liab = get_float(["long-term liabilities", "long term liabilities", "non-current liabilities"])
     equity = get_float(["total equity", "net worth"])
     retained = get_float(["retained earnings", "accumulated profits"])
-    investment = equity - retained if retained else 0.0
+    investment = None
+
+    if retained is not None and equity is not None:
+        investment = equity - retained
+    elif retained is None and equity is not None:
+        retained = 0.0
+        investment = equity
+    elif equity is None:
+        equity = 0.0
+        retained = 0.0
+        investment = 0.0
 
     total_equity = investment + retained
-    total_liabilities_and_equity = short_term_liab + long_term_liab + total_equity
+    total_liabilities_and_equity = sum(filter(None, [short_term_liab, long_term_liab])) + total_equity
 
     return pd.DataFrame({
         "Category": [
@@ -38,11 +42,11 @@ def extract_clean_balance_sheet(df):
             "Total Liabilities & Equity"
         ],
         "Amount": [
-            short_term_liab,
-            long_term_liab,
-            investment,
-            retained,
-            total_equity,
-            total_liabilities_and_equity
+            short_term_liab or 0.0,
+            long_term_liab or 0.0,
+            investment or 0.0,
+            retained or 0.0,
+            total_equity or 0.0,
+            total_liabilities_and_equity or 0.0
         ]
     })
