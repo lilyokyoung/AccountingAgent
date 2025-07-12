@@ -1,49 +1,66 @@
-# ✅ balance_sheet_utils.py
 import pandas as pd
+import difflib
 
-def extract_balance_sheet_summary(df: pd.DataFrame) -> pd.DataFrame:
-    # Handle bad headers
-    if df.columns[0] != "Fiscal Year" and df.iloc[0].str.contains("fiscal", case=False).any():
-        df.columns = df.iloc[0]
-        df = df.drop(0).reset_index(drop=True)
+def fuzzy_get_column(df, target_keywords, cutoff=0.6):
+    columns = [str(c).strip().lower() for c in df.columns]
+    for keyword in target_keywords:
+        matches = difflib.get_close_matches(keyword.lower(), columns, n=1, cutoff=cutoff)
+        if matches:
+            match_index = columns.index(matches[0])
+            return df.columns[match_index]
+    return None
 
-    df.columns = df.columns.astype(str).str.strip().str.lower()
+def extract_clean_balance_sheet(df):
+    df.columns = df.iloc[0]  # use first row as header
+    df = df.drop(0).reset_index(drop=True)
+    latest = df.iloc[0]
 
-    # Ensure fiscal year is numeric
-    df["fiscal year"] = pd.to_numeric(df["fiscal year"], errors='coerce')
-    df = df.dropna(subset=["fiscal year"]).sort_values("fiscal year", ascending=True)
+    def get_value(possible_names):
+        col = fuzzy_get_column(df, possible_names)
+        if col:
+            try:
+                return float(str(latest[col]).replace(",", ""))
+            except:
+                return None
+        return None
 
-    # Extract trend over time
-    trend_data = []
-    for _, row in df.iterrows():
-        fy = int(row["fiscal year"])
+    short_term_liab = get_value(["short term liabilities", "current liabilities"])
+    long_term_liab = get_value(["long term liabilities", "non current liabilities"])
+    equity = get_value(["total equity", "net worth"])
+    retained = get_value(["retained earnings", "accumulated profits"])
 
-        def find_val(possible_names):
-            for name in possible_names:
-                for col in df.columns:
-                    if name.lower() in col:
-                        try:
-                            return float(str(row[col]).replace(",", "").strip())
-                        except:
-                            continue
-            return 0.0
+    if retained is not None and equity is not None:
+        investment = equity - retained
+    elif retained is None and equity is not None:
+        retained = 0.0
+        investment = equity
+    elif equity is None:
+        equity = 0.0
+        retained = 0.0
+        investment = 0.0
+    else:
+        investment = 0.0
 
-        short_term = find_val(["short-term", "current liabilities"])
-        long_term = find_val(["long-term", "non-current liabilities"])
-        equity = find_val(["total equity", "net worth"])
-        retained = find_val(["retained earnings", "accumulated"])
-        investment = equity - retained if equity and retained else equity
-        total_equity = investment + retained
-        total_liab_equity = short_term + long_term + total_equity
+    total_equity = investment + retained
+    total_liabilities_and_equity = sum(filter(None, [short_term_liab, long_term_liab])) + total_equity
 
-        trend_data.append({
-            "Fiscal Year": fy,
-            "Short-Term Liabilities": short_term,
-            "Long-Term Liabilities": long_term,
-            "Owner's Investment": investment,
-            "Retained Earnings": retained,
-            "Total Owner's Equity": total_equity,
-            "Total Liabilities & Equity": total_liab_equity
-        })
+    summary_df = pd.DataFrame({
+        "Category": [
+            "Short-Term Liabilities",
+            "Long-Term Liabilities",
+            "Owner's Investment",
+            "Retained Earnings",
+            "Total Owner's Equity",
+            "Total Liabilities & Equity"
+        ],
+        "Amount": [
+            short_term_liab or 0.0,
+            long_term_liab or 0.0,
+            investment or 0.0,
+            retained or 0.0,
+            total_equity or 0.0,
+            total_liabilities_and_equity or 0.0
+        ]
+    })
 
-    return pd.DataFrame(trend_data)
+    return summary_df
