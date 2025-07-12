@@ -62,16 +62,19 @@ def detect_industry(name):
     return "Unknown"
 
 def ai_commentary(df, industry):
-    latest = df.iloc[-1]
-    prompt = f"""You are a financial analyst. The company is in the {industry} industry.
-Here are the latest ratios:
-- Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')}
-- Equity Ratio: {latest.get('Equity Ratio')}
-- Current Ratio: {latest.get('Current Ratio')}
-- ROE: {latest.get('ROE')}
-- Net Profit Margin: {latest.get('Net Profit Margin')}
-Compare with industry averages and give recommendations."""
-    return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text.strip()
+    try:
+        latest = df.iloc[-1]
+        prompt = f"""You are a financial analyst. The company is in the {industry} industry.
+Here are the latest financial ratios:
+Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')},
+Equity Ratio: {latest.get('Equity Ratio')},
+Current Ratio: {latest.get('Current Ratio')},
+ROE: {latest.get('ROE')},
+Net Profit Margin: {latest.get('Net Profit Margin')}
+Compare these to industry averages and give short, practical advice."""
+        return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text.strip()
+    except Exception as e:
+        return f"❌ Gemini commentary failed: {str(e).split(':')[0]}"
 
 def ai_forecast(df, industry):
     prompt = f"""You are a financial forecasting expert.
@@ -193,10 +196,13 @@ if uploaded_file:
     st.subheader("🧠 Ask Gemini")
     user_q = st.text_input("Ask a question about this firm or its ratios:")
     if user_q:
-        answer = genai.GenerativeModel("gemini-1.5-flash").generate_content(
-            f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}"
-        ).text.strip()
-        st.success(answer)
+        try:
+            answer = genai.GenerativeModel("gemini-1.5-flash").generate_content(
+                f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}"
+            ).text.strip()
+            st.success(answer)
+        except Exception as e:
+            st.warning(f"❌ Gemini Q&A failed: {str(e).split(':')[0]}")
 
     # 🔮 Forecast
     st.subheader("🔮 Forecast (5 Years)")
