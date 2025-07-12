@@ -6,31 +6,36 @@ import io
 import requests
 from fpdf import FPDF
 
-# 🔐 API key setup for OpenRouter (DeepSeek)
+# 🔐 OpenRouter API Key from secrets
 OPENROUTER_API_KEY = st.secrets["openrouter"]["api_key"]
 
+# 🧠 Unified LLM Caller via OpenRouter
 def openrouter_call(prompt, model="deepseek/deepseek-coder:free", max_tokens=1024):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost",  # change if deploying
+        "HTTP-Referer": "http://localhost",
         "X-Title": "AI Financial Forecasting"
     }
     data = {
         "model": model,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0.7
     }
     try:
         response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
-        return response.json()["choices"][0]["message"]["content"].strip()
+        response_json = response.json()
+        if "choices" in response_json:
+            return response_json["choices"][0]["message"]["content"].strip()
+        elif "error" in response_json:
+            return f"❌ OpenRouter Error: {response_json['error'].get('message', 'Unknown')}"
+        else:
+            return f"❌ Unexpected response: {response_json}"
     except Exception as e:
-        return f"❌ OpenRouter call failed: {str(e).split(':')[0]}"
+        return f"❌ Request failed: {str(e)}"
 
-# 🌟 App branding
+# 🎨 App Setup and Branding
 st.set_page_config(page_title="Your AI-Powered Financial Accountant", layout="wide")
 st.title("🧠 Your AI-Powered Financial Accountant")
 
@@ -55,11 +60,13 @@ st.markdown("""
 Your AI-Powered Financial Accountant doesn’t just crunch numbers – it thinks like a CFO. Upload your data and unlock professional-grade insights.
 """, unsafe_allow_html=True)
 
+# 📊 Benchmarks
 INDUSTRY_BENCHMARKS = {
     "Dairy": {"Debt-to-Equity Ratio": 1.2, "Equity Ratio": 0.45, "Current Ratio": 1.8, "ROE": 0.12, "Net Profit Margin": 0.08},
     "Tech": {"Debt-to-Equity Ratio": 0.5, "Equity Ratio": 0.7, "Current Ratio": 2.5, "ROE": 0.15, "Net Profit Margin": 0.2}
 }
 
+# 🔧 Utilities
 def fuzzy_match(target, columns):
     match = difflib.get_close_matches(target, columns, n=1, cutoff=0.6)
     return match[0] if match else None
@@ -84,20 +91,20 @@ def detect_industry(name):
 def ai_commentary(df, industry):
     latest = df.iloc[-1]
     prompt = f"""You are a financial analyst. The company is in the {industry} industry.
-Here are the latest financial ratios:
+Here are the latest ratios:
 Debt-to-Equity: {latest.get('Debt-to-Equity Ratio')},
 Equity Ratio: {latest.get('Equity Ratio')},
 Current Ratio: {latest.get('Current Ratio')},
 ROE: {latest.get('ROE')},
 Net Profit Margin: {latest.get('Net Profit Margin')}
-Compare with industry averages and give recommendations."""
+Compare with industry benchmarks and give concise advice."""
     return openrouter_call(prompt)
 
 def ai_forecast(df, industry):
     prompt = f"""You are a financial forecasting expert.
 Forecast the next 5 years for:
 Owner's Equity, Short-Term Liabilities, Long-Term Liabilities, Current Assets, Revenue, Net Profit.
-Based on past data:\n{df.tail(5).to_string(index=False)}\nReturn a clean table."""
+Based on:\n{df.tail(5).to_string(index=False)}\nReturn in table format using pipe separators."""
     return openrouter_call(prompt)
 
 def parse_forecast_table(text_response):
@@ -146,8 +153,11 @@ def create_pdf_report(df, name):
     output.seek(0)
     return output
 
-# Upload
+# 📂 Upload file
 uploaded_file = st.file_uploader("📂 Upload Excel or CSV File", type=["xlsx", "csv"])
+if st.button("🧪 Test OpenRouter Connection"):
+    st.write(openrouter_call("Say hello!"))
+
 if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
     df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
@@ -161,7 +171,6 @@ if uploaded_file:
     company_name = uploaded_file.name.replace(".xlsx", "").replace(".csv", "")
     st.markdown(f"<div class='info-box'>🏢 Detected Company: <b>{company_name}</b><br>🏷️ Industry: <b>{industry}</b></div>", unsafe_allow_html=True)
 
-    # Balance Sheet + Income Statement
     balance_vars = [col for col in df.columns if "Liabilities" in col or "Equity" in col or "Assets" in col]
     income_vars = [col for col in df.columns if col not in balance_vars and col not in ['Fiscal Year'] and df[col].dtype != 'O']
 
@@ -171,7 +180,6 @@ if uploaded_file:
     st.subheader("💰 Income Statement")
     st.dataframe(df[["Fiscal Year"] + income_vars])
 
-    # Ratio Trends
     st.subheader("📈 Ratio Trends")
     ratio_cols = ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]
     st.plotly_chart(px.line(df, x="Fiscal Year", y=ratio_cols, markers=True))
@@ -182,7 +190,6 @@ if uploaded_file:
     st.subheader("📊 Income Statement Components Over Time")
     st.plotly_chart(px.bar(df, x="Fiscal Year", y=income_vars, barmode="group"), use_container_width=True)
 
-    # Benchmark
     if industry in INDUSTRY_BENCHMARKS:
         st.subheader(f"🧮 Benchmark Comparison – {industry}")
         latest = df.iloc[-1]
@@ -203,22 +210,18 @@ if uploaded_file:
                              x="Source", y=ratio, color="Source", color_discrete_sequence=colors)
                 st.plotly_chart(fig, use_container_width=True)
 
-    # Commentary
     st.subheader("💬 DeepSeek Commentary")
     st.markdown(ai_commentary(df, industry))
 
-    # Q&A
     st.subheader("🧠 Ask DeepSeek")
     user_q = st.text_input("Ask a question about this firm or its ratios:")
     if user_q:
         answer = openrouter_call(f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}")
         st.success(answer)
 
-    # Forecast
     st.subheader("🔮 Forecast (5 Years)")
     forecast_txt = ai_forecast(df, industry)
     st.code(forecast_txt)
-
     df_forecast = parse_forecast_table(forecast_txt)
     if df_forecast is not None and not df_forecast.empty:
         col1, col2 = st.columns(2)
@@ -231,7 +234,6 @@ if uploaded_file:
     else:
         st.warning("❌ Forecast could not be parsed.")
 
-    # Downloads
     st.subheader("📥 Download Reports")
     st.download_button("⬇️ Excel Report", convert_df_to_excel(df), file_name="report.xlsx")
     st.download_button("⬇️ PDF Report", create_pdf_report(df, company_name), file_name="report.pdf")
