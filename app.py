@@ -1,69 +1,72 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+from difflib import get_close_matches
+import re
 import os
 
-st.set_page_config(page_title="📊 Accounting Analyzer", layout="wide")
-st.title("🧾 Cleaned Balance Sheet Summary")
+# --- Config ---
+st.set_page_config(page_title="🧾 Smart Balance Sheet Analyzer", layout="wide")
+st.title("💡 Smart Balance Sheet Analyzer")
 
-uploaded_file = st.file_uploader("Upload Balance Sheet Excel File", type=["xlsx", "xls"])
+# --- Utility Functions ---
+def normalize_text(text):
+    return re.sub(r'[^a-z0-9]', '', str(text).lower().strip())
 
-def detect_company_and_industry(filename):
-    if filename:
-        name = os.path.basename(filename).split('.')[0]
-        company = name.replace("_", " ")
-        if "fonterra" in name.lower():
-            return company, "Dairy"
-        elif "airnz" in name.lower():
-            return company, "Airlines"
-        elif "zenergy" in name.lower():
-            return company, "Energy"
-        else:
-            return company, "Unknown"
-    return "Unknown", "Unknown"
+def detect_header_row(df, key_terms=["assets", "liabilities", "equity", "net worth"]):
+    for i in range(min(10, len(df))):
+        row = df.iloc[i].astype(str).str.lower().str.replace(r'[^a-z]', '', regex=True)
+        if any(term in ' '.join(row) for term in key_terms):
+            return i
+    return 0  # fallback
 
 def match_column(df, options):
-    for opt in options:
-        for col in df.columns:
-            if str(opt).lower().strip() in str(col).lower().strip():
-                return col
+    norm_cols = {normalize_text(col): col for col in df.columns}
+    for label in options:
+        norm_label = normalize_text(label)
+        match = get_close_matches(norm_label, norm_cols.keys(), n=1, cutoff=0.6)
+        if match:
+            return norm_cols[match[0]]
     return None
 
 def extract_clean_balance_sheet(df):
-    if df.empty:
-        return pd.DataFrame(), []
-
-    df.columns = df.iloc[0]
-    df = df.drop(0).reset_index(drop=True)
-
-    latest = df.iloc[-1]
     notes = []
+    if df.empty:
+        return pd.DataFrame(), ["❌ Empty DataFrame"]
 
-    short_term_col = match_column(df, ["short term liabilities", "current liabilities"])
-    long_term_col = match_column(df, ["long term liabilities", "non current liabilities"])
-    equity_col = match_column(df, ["total equity", "net worth", "owner's equity"])
-    retained_col = match_column(df, ["retained earnings", "accumulated profits"])
+    header_row = detect_header_row(df)
+    df.columns = df.iloc[header_row]
+    df = df.drop(range(0, header_row + 1)).reset_index(drop=True)
+    latest = df.iloc[-1]
 
-    def safe_float(val):
-        try:
-            return float(str(val).replace(",", "").strip())
-        except:
-            return 0.0
+    fields = {
+        "Short-Term Liabilities": ["short term liabilities", "current liabilities"],
+        "Long-Term Liabilities": ["long term liabilities", "non current liabilities"],
+        "Retained Earnings": ["retained earnings", "accumulated profits"],
+        "Owner's Equity": ["total equity", "owner's equity", "net worth"]
+    }
 
-    short_term = safe_float(latest[short_term_col]) if short_term_col else 0.0
-    if not short_term_col: notes.append("❌ No match found for 'short term liabilities'")
-    long_term = safe_float(latest[long_term_col]) if long_term_col else 0.0
-    if not long_term_col: notes.append("❌ No match found for 'long term liabilities'")
-    retained = safe_float(latest[retained_col]) if retained_col else 0.0
-    if not retained_col: notes.append("❌ No match found for 'retained earnings'")
-    equity = safe_float(latest[equity_col]) if equity_col else 0.0
-    if not equity_col: notes.append("❌ No match found for 'total equity'")
+    values = {}
 
-    investment = max(equity - retained, 0.0)
-    total_equity = investment + retained
-    total_liabilities_equity = short_term + long_term + total_equity
+    def try_get(field):
+        col = match_column(df, fields[field])
+        if col:
+            try:
+                return float(str(latest[col]).replace(",", "").strip()), None
+            except:
+                return 0.0, f"⚠️ Couldn't convert value for `{field}`"
+        return 0.0, f"❌ No match found for `{field}`"
 
-    result_df = pd.DataFrame({
+    for k in fields:
+        val, note = try_get(k)
+        values[k] = val
+        if note:
+            notes.append(note)
+
+    investment = max(values["Owner's Equity"] - values["Retained Earnings"], 0.0)
+    total_equity = investment + values["Retained Earnings"]
+    total_liabilities_equity = values["Short-Term Liabilities"] + values["Long-Term Liabilities"] + total_equity
+
+    summary = pd.DataFrame({
         "Category": [
             "Short-Term Liabilities",
             "Long-Term Liabilities",
@@ -72,60 +75,36 @@ def extract_clean_balance_sheet(df):
             "Total Owner's Equity",
             "Total Liabilities & Equity"
         ],
-        "Amount": [short_term, long_term, investment, retained, total_equity, total_liabilities_equity]
+        "Amount": [
+            values["Short-Term Liabilities"],
+            values["Long-Term Liabilities"],
+            investment,
+            values["Retained Earnings"],
+            total_equity,
+            total_liabilities_equity
+        ]
     })
 
-    return result_df, notes
+    return summary, notes
 
-industry_benchmarks = {
-    "Dairy": {"DebtToEquity": 1.2, "EquityRatio": 0.45},
-    "Airlines": {"DebtToEquity": 2.5, "EquityRatio": 0.2},
-    "Energy": {"DebtToEquity": 1.0, "EquityRatio": 0.5},
-}
+# --- File Upload ---
+uploaded_file = st.file_uploader("📤 Upload Balance Sheet Excel or CSV File", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    company_name, industry = detect_company_and_industry(uploaded_file.name)
-    result_df, extract_notes = extract_clean_balance_sheet(df)
-
-    st.dataframe(result_df, use_container_width=True)
-
-    if extract_notes:
-        for note in extract_notes:
-            st.warning(note)
-
-    st.subheader("🏢 Detected Company: " + company_name)
-    st.markdown(f"🏷️ **Industry Classification:** {industry}")
-
-    st.subheader(f"📊 Industry Benchmark Comparison for `{industry}`")
-    if industry in industry_benchmarks:
-        debt = result_df[result_df["Category"] == "Short-Term Liabilities"]["Amount"].values[0] + \
-               result_df[result_df["Category"] == "Long-Term Liabilities"]["Amount"].values[0]
-        equity = result_df[result_df["Category"] == "Total Owner's Equity"]["Amount"].values[0]
-
-        if equity > 0:
-            debt_to_equity = round(debt / equity, 2)
-            equity_ratio = round(equity / (debt + equity), 2)
-        else:
-            debt_to_equity = None
-            equity_ratio = None
-
-        industry_data = industry_benchmarks[industry]
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Debt to Equity", f"{debt_to_equity if debt_to_equity is not None else 'N/A'}")
-            st.caption(f"📊 Industry Avg: {industry_data['DebtToEquity']}")
-        with col2:
-            st.metric("Equity Ratio", f"{equity_ratio if equity_ratio is not None else 'N/A'}")
-            st.caption(f"📊 Industry Avg: {industry_data['EquityRatio']}")
-
-    st.subheader("📈 Year-over-Year Trend (if available)")
-    if "Fiscal Year" in df.columns:
-        trend_df = df[["Fiscal Year"] + [c for c in df.columns if "liabilities" in str(c).lower() or "equity" in str(c).lower()]]
-        trend_df = trend_df.dropna()
-        fig = px.line(trend_df, x="Fiscal Year", y=trend_df.columns[1:], markers=True, title="Financial Components Over Time")
-        st.plotly_chart(fig, use_container_width=True)
+    if uploaded_file.name.endswith(".csv"):
+        df_uploaded = pd.read_csv(uploaded_file)
     else:
-        st.info("No 'Fiscal Year' column found for trend analysis.")
+        df_uploaded = pd.read_excel(uploaded_file)
+
+    company_name = os.path.splitext(uploaded_file.name)[0]
+    st.markdown(f"🏢 **Detected Company:** `{company_name}`")
+
+    summary_df, warnings = extract_clean_balance_sheet(df_uploaded)
+
+    st.subheader("📊 Cleaned Balance Sheet Summary")
+    st.dataframe(summary_df, use_container_width=True)
+
+    for note in warnings:
+        st.warning(note)
 else:
-    st.info("Please upload an Excel file to begin analysis.")
+    st.info("👈 Upload a file to get started.")
