@@ -83,11 +83,10 @@ def plot_ratio_comparison(firm_value, benchmark, ratio_name):
     if pd.isna(firm_value) or pd.isna(benchmark):
         return
 
-    # Vibrant colors
     COLORS = {
-        "green": "#2ECC40",   # bright green
-        "red": "#FF4136",     # vivid red
-        "yellow": "#FFDC00"   # bold yellow
+        "green": "#4CAF50",   # soft green
+        "red": "#F44336",     # muted red
+        "yellow": "#FFC107"   # amber
     }
 
     if abs(firm_value - benchmark) <= 0.05 * benchmark:
@@ -133,8 +132,10 @@ if uploaded_file:
     st.dataframe(df.head())
 
     industry = detect_industry(uploaded_file.name)
-    st.markdown(f"🏢 **Detected Company:** `{uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}`")
-    st.markdown(f"🏷️ **Industry:** `{industry}`")
+
+    # 🔍 Highlighted company and industry
+    st.markdown(f"<h4 style='font-size:22px;'>🏢 <b>Detected Company:</b> {uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='font-size:22px;'>🏷️ <b>Industry:</b> {industry}</h4>", unsafe_allow_html=True)
 
     expected_fields = {
         "Short-Term Liabilities": "Short-Term Liabilities",
@@ -192,7 +193,7 @@ if uploaded_file:
         with st.spinner("Generating insights..."):
             st.markdown(ai_commentary(df, industry))
 
-        # 📊 BALANCE SHEET & INCOME STATEMENT TABLES + GRAPHS
+        # 📊 BALANCE SHEET & INCOME STATEMENT DISPLAY
         st.header("📄 Balance Sheet and Income Statement Over Time")
 
         bs_fields = ["Fiscal Year", "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"]
