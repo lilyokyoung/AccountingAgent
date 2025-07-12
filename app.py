@@ -33,13 +33,13 @@ st.markdown("""
 Your AI-Powered Financial Accountant doesn’t just crunch numbers – it thinks like a CFO. Upload your data and unlock professional-grade insights.
 """, unsafe_allow_html=True)
 
-# 🔍 Industry benchmarks
+# 📊 Industry benchmarks
 INDUSTRY_BENCHMARKS = {
     "Dairy": {"Debt-to-Equity Ratio": 1.2, "Equity Ratio": 0.45, "Current Ratio": 1.8, "ROE": 0.12, "Net Profit Margin": 0.08},
     "Tech": {"Debt-to-Equity Ratio": 0.5, "Equity Ratio": 0.7, "Current Ratio": 2.5, "ROE": 0.15, "Net Profit Margin": 0.2}
 }
 
-# 🔧 Helper functions
+# 🧠 Helper functions
 def fuzzy_match(target, columns):
     match = difflib.get_close_matches(target, columns, n=1, cutoff=0.6)
     return match[0] if match else None
@@ -75,21 +75,15 @@ Compare with industry averages and give recommendations."""
 
 def ai_forecast(df, industry):
     prompt = f"""You are a financial forecasting expert.
-Forecast the next 5 years for the following:
+Forecast the next 5 years for:
 Owner's Equity, Short-Term Liabilities, Long-Term Liabilities, Current Assets, Revenue, Net Profit.
-
-Based on past data:\n{df.tail(5).to_string(index=False)}
-
-Return the forecast in a clean table format with this structure:
-Year | Owner's Equity | Short-Term Liabilities | Long-Term Liabilities | Current Assets | Revenue | Net Profit
-Only return the table."""
+Based on past data:\n{df.tail(5).to_string(index=False)}\nReturn only a clean table with rows and columns."""
     return genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt).text.strip()
 
 def parse_forecast_table(text_response):
     try:
         lines = [line.strip() for line in text_response.splitlines() if line.strip()]
-        header = lines[0].split("|")
-        header = [h.strip() for h in header]
+        header = [h.strip() for h in lines[0].split("|")]
         data = [[v.strip() for v in row.split("|")] for row in lines[1:] if "|" in row]
         df_forecast = pd.DataFrame(data, columns=header)
         for col in df_forecast.columns[1:]:
@@ -132,7 +126,7 @@ def create_pdf_report(df, name):
     output.seek(0)
     return output
 
-# 📤 File upload
+# 📤 Upload
 uploaded_file = st.file_uploader("📂 Upload Excel or CSV File", type=["xlsx", "csv"])
 if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
@@ -147,57 +141,62 @@ if uploaded_file:
     company_name = uploaded_file.name.replace(".xlsx", "").replace(".csv", "")
     st.markdown(f"<div class='info-box'>🏢 Detected Company: <b>{company_name}</b><br>🏷️ Industry: <b>{industry}</b></div>", unsafe_allow_html=True)
 
-    # 📑 Tables
+    # 📑 Balance Sheet
     st.subheader("📑 Balance Sheet")
-    st.dataframe(df[["Fiscal Year", "Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"]])
+    balance_vars = [col for col in df.columns if "Liabilities" in col or "Equity" in col or "Assets" in col]
+    st.dataframe(df[["Fiscal Year"] + balance_vars])
 
+    # 💰 Income Statement
     st.subheader("💰 Income Statement")
-    st.dataframe(df[["Fiscal Year", "Revenue", "Net Profit"]])
+    income_vars = [col for col in df.columns if col not in balance_vars and col not in ['Fiscal Year'] and df[col].dtype != 'O']
+    st.dataframe(df[["Fiscal Year"] + income_vars])
 
-    # 📊 Graphs
+    # 📊 Ratio Trends
     st.subheader("📈 Ratio Trends")
-    st.plotly_chart(px.line(df, x="Fiscal Year", y=["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"], markers=True))
+    ratio_cols = ["Debt-to-Equity Ratio", "Equity Ratio", "Current Ratio", "ROE", "Net Profit Margin"]
+    st.plotly_chart(px.line(df, x="Fiscal Year", y=ratio_cols, markers=True))
 
+    # 📊 Balance Sheet Graph
     st.subheader("📊 Balance Sheet Components Over Time")
-    bs_vars = [col for col in ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity", "Current Assets"] if col in df.columns]
-    st.plotly_chart(px.bar(df, x="Fiscal Year", y=bs_vars, barmode="group"), use_container_width=True)
+    st.plotly_chart(px.bar(df, x="Fiscal Year", y=balance_vars, barmode="group"), use_container_width=True)
 
+    # 📊 Income Statement Graph
     st.subheader("📊 Income Statement Components Over Time")
-    is_vars = [col for col in ["Revenue", "Net Profit"] if col in df.columns]
-    st.plotly_chart(px.bar(df, x="Fiscal Year", y=is_vars, barmode="group"), use_container_width=True)
+    st.plotly_chart(px.bar(df, x="Fiscal Year", y=income_vars, barmode="group"), use_container_width=True)
 
-    # 🧮 Benchmark Comparison
+    # 🧮 Benchmark
     if industry in INDUSTRY_BENCHMARKS:
         st.subheader(f"🧮 Benchmark Comparison – {industry}")
         latest = df.iloc[-1]
         for ratio, benchmark in INDUSTRY_BENCHMARKS[industry].items():
             val = latest.get(ratio)
             if pd.notna(val):
-                if abs(val - benchmark) <= 0.05 * benchmark:
-                    color, tag = "#FFD700", "🟡 On Par"
-                elif val > benchmark:
-                    color, tag = "#32CD32", "🟢 Above"
+                if val > benchmark:
+                    colors = ["#32CD32", "red"]
+                    tag = "🟢 Your firm is performing better"
+                elif val < benchmark:
+                    colors = ["red", "#32CD32"]
+                    tag = "🔴 Industry is performing better"
                 else:
-                    color, tag = "red", "🔴 Below"
+                    colors = ["#FFD700", "#FFD700"]
+                    tag = "🟡 On Par"
                 st.markdown(f"**{ratio}**: {val:.2f} vs {benchmark:.2f} → {tag}")
-                fig = px.bar(
-                    pd.DataFrame({"Source": ["Your Firm", "Industry"], ratio: [val, benchmark]}),
-                    x="Source", y=ratio, color="Source",
-                    color_discrete_sequence=["#32CD32", "gray"]
-                )
+                fig = px.bar(pd.DataFrame({"Source": ["Your Firm", "Industry"], ratio: [val, benchmark]}),
+                             x="Source", y=ratio, color="Source", color_discrete_sequence=colors)
                 st.plotly_chart(fig, use_container_width=True)
 
-    # 💬 Commentary
+    # 💬 Gemini Commentary
     st.subheader("💬 Gemini Commentary")
     st.markdown(ai_commentary(df, industry))
 
-    # 🧠 Q&A
+    # 🧠 Gemini Q&A
     st.subheader("🧠 Ask Gemini")
     user_q = st.text_input("Ask a question about this firm or its ratios:")
     if user_q:
-        response = genai.GenerativeModel("gemini-1.5-flash").generate_content(
-            f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}")
-        st.success(response.text.strip())
+        answer = genai.GenerativeModel("gemini-1.5-flash").generate_content(
+            f"Data:\n{df.tail(5).to_string(index=False)}\nQuestion: {user_q}"
+        ).text.strip()
+        st.success(answer)
 
     # 🔮 Forecast
     st.subheader("🔮 Forecast (5 Years)")
@@ -215,7 +214,7 @@ if uploaded_file:
     else:
         st.warning("❌ Forecast could not be parsed.")
 
-    # 📥 Downloads
+    # 📥 Download Reports
     st.subheader("📥 Download Reports")
     st.download_button("⬇️ Excel Report", convert_df_to_excel(df), file_name="report.xlsx")
     st.download_button("⬇️ PDF Report", create_pdf_report(df, company_name), file_name="report.pdf")
