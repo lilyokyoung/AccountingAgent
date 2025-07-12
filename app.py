@@ -9,7 +9,7 @@ genai.configure(api_key=st.secrets["gemini"]["api_key"])
 st.set_page_config(page_title="📊 Accounting Analyzer", layout="wide")
 st.title("📈 Financial Statement Analyzer with Industry Comparison & AI Insights")
 
-# 📘 Hardcoded benchmarks
+# 📘 Benchmarks
 INDUSTRY_BENCHMARKS = {
     "Dairy": {
         "Debt-to-Equity Ratio": 1.20,
@@ -91,12 +91,15 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith(".xlsx") else pd.read_csv(uploaded_file)
     df.rename(columns={df.columns[0]: "Fiscal Year"}, inplace=True)
 
+    st.write("🧾 Columns detected:", df.columns.tolist())
+    st.dataframe(df.head())
+
     # 🔍 Detect industry
     industry = detect_industry(uploaded_file.name)
     st.markdown(f"🏢 **Detected Company:** `{uploaded_file.name.replace('.xlsx', '').replace('.csv', '')}`")
     st.markdown(f"🏷️ **Industry:** `{industry}`")
 
-    # 🔧 Map likely columns
+    # 🔧 Try auto-mapping
     col_map = {
         "Short-Term Liabilities": None,
         "Long-Term Liabilities": None,
@@ -108,22 +111,28 @@ if uploaded_file:
 
     for col in df.columns:
         col_lower = col.lower()
-        if "short" in col_lower and not col_map["Short-Term Liabilities"]:
+        if "short" in col_lower and "liab" in col_lower:
             col_map["Short-Term Liabilities"] = col
-        elif "long" in col_lower and not col_map["Long-Term Liabilities"]:
+        elif "long" in col_lower and "liab" in col_lower:
             col_map["Long-Term Liabilities"] = col
         elif "equity" in col_lower or "net worth" in col_lower:
             col_map["Owner's Equity"] = col
-        elif "current asset" in col_lower:
+        elif any(k in col_lower for k in ["current asset", "short-term asset"]):
             col_map["Current Assets"] = col
-        elif "net profit" in col_lower or "net income" in col_lower:
+        elif any(k in col_lower for k in ["net profit", "net income", "profit after tax", "profit"]):
             col_map["Net Profit"] = col
-        elif "revenue" in col_lower or "sales" in col_lower:
+        elif any(k in col_lower for k in ["revenue", "sales", "turnover"]):
             col_map["Revenue"] = col
 
+    # 🛠 Manual override
+    with st.expander("🛠 Manually confirm or correct column mapping"):
+        for key in col_map:
+            col_map[key] = st.selectbox(f"{key}", [None] + list(df.columns), index=[None] + list(df.columns).index(col_map[key]) if col_map[key] in df.columns else 0)
+
+    # ✅ Proceed if essentials present
     essential_cols = ["Short-Term Liabilities", "Long-Term Liabilities", "Owner's Equity"]
     if not all(col_map[c] for c in essential_cols):
-        st.error("❌ Missing STL, LTL, or Equity columns.")
+        st.error("❌ Missing essential columns: STL, LTL, or Equity.")
     else:
         df = df.rename(columns={v: k for k, v in col_map.items() if v})
         df = compute_ratios(df)
@@ -137,7 +146,6 @@ if uploaded_file:
                 fig = px.line(df, x="Fiscal Year", y=ratio, markers=True, title=ratio)
                 st.plotly_chart(fig, use_container_width=True)
 
-        # 🧮 Industry comparison (graph + text)
         if industry in INDUSTRY_BENCHMARKS:
             st.subheader(f"🧮 Benchmark Comparison – {industry}")
             latest = df.iloc[-1]
